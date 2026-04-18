@@ -1,0 +1,25 @@
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/files/
+backend/tests/reports/
+backend/tests/results/
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/.env
+frontend/test-results.json
+frontend/integration-test-report.*
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
