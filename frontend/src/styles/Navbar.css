@@ -1,0 +1,549 @@
+.stegoshield-navbar {
+  background: rgba(255, 255, 255, 0.95);
+  border-bottom: none;
+  padding: 12px 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(10px);
+}
+
+.stegoshield-navbar-left {
+  display: flex;
+  align-items: center;
+}
+
+.stegoshield-navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.stegoshield-navbar-brand-icon {
+  width: 52px;
+  height: 52px;
+  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.stegoshield-navbar-brand-icon:hover {
+  transform: scale(1.02);
+  box-shadow: 0 6px 15px rgba(37, 99, 235, 0.25);
+}
+
+.stegoshield-navbar-brand-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 50%;
+  transform: scale(1.05);
+}
+
+.stegoshield-navbar-brand-icon:has(img[style*="display: none"]) {
+  font-size: 28px;
+  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+}
+
+.stegoshield-navbar-brand-text h1 {
+  font-size: 22px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 2px;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+}
+
+.stegoshield-navbar-brand-text p {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.stegoshield-navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.stegoshield-navbar-datetime-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f8fafc;
+  padding: 8px 20px;
+  border-radius: 50px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.stegoshield-navbar-datetime-wrapper:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.stegoshield-navbar-flag-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.stegoshield-navbar-flag-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.stegoshield-navbar-datetime-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stegoshield-navbar-datetime-date {
+  font-size: 13px;
+  color: #475569;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.stegoshield-navbar-datetime-separator {
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.stegoshield-navbar-datetime-time {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e3a8a;
+  font-family: 'Courier New', 'Segoe UI', monospace;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.stegoshield-navbar-divider {
+  width: 1px;
+  height: 40px;
+  background: linear-gradient(to bottom, transparent, #cbd5e1, transparent);
+  flex-shrink: 0;
+}
+
+.stegoshield-navbar-admin-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #f8fafc;
+  border-radius: 50px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.stegoshield-navbar-admin-info:hover {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.stegoshield-navbar-admin-avatar-wrapper {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.stegoshield-navbar-admin-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.stegoshield-navbar-admin-avatar-wrapper:has(img[style*="display: none"]) {
+  font-size: 18px;
+  font-weight: 700;
+  color: white;
+}
+
+.stegoshield-navbar-admin-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.stegoshield-navbar-admin-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.stegoshield-navbar-admin-role {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.stegoshield-navbar-btn-logout {
+  padding: 8px 24px;
+  background: white;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  color: #475569;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.stegoshield-navbar-btn-logout:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.15);
+}
+
+.stegoshield-navbar-btn-logout:active {
+  transform: translateY(0);
+}
+
+@media (min-width: 1400px) {
+  .stegoshield-navbar {
+    padding: 14px 48px;
+  }
+
+  .stegoshield-navbar-brand-icon {
+    width: 58px;
+    height: 58px;
+  }
+
+  .stegoshield-navbar-brand-text h1 {
+    font-size: 25px;
+  }
+
+  .stegoshield-navbar-brand-text p {
+    font-size: 12px;
+  }
+
+  .stegoshield-navbar-right {
+    gap: 24px;
+  }
+
+  .stegoshield-navbar-datetime-wrapper {
+    padding: 10px 24px;
+    gap: 14px;
+  }
+
+  .stegoshield-navbar-flag-wrapper {
+    width: 36px;
+    height: 36px;
+  }
+
+  .stegoshield-navbar-datetime-date {
+    font-size: 14px;
+  }
+
+  .stegoshield-navbar-datetime-time {
+    font-size: 16px;
+  }
+
+  .stegoshield-navbar-admin-avatar-wrapper {
+    width: 48px;
+    height: 48px;
+  }
+
+  .stegoshield-navbar-admin-name {
+    font-size: 15px;
+  }
+
+  .stegoshield-navbar-admin-role {
+    font-size: 12px;
+  }
+
+  .stegoshield-navbar-btn-logout {
+    padding: 10px 28px;
+    font-size: 14px;
+  }
+
+  .stegoshield-navbar-divider {
+    height: 46px;
+  }
+}
+
+@media (min-width: 1025px) and (max-width: 1399px) {
+  .stegoshield-navbar {
+    padding: 12px 36px;
+  }
+
+  .stegoshield-navbar-right {
+    gap: 18px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .stegoshield-navbar {
+    padding: 12px 24px;
+  }
+
+  .stegoshield-navbar-right {
+    gap: 14px;
+  }
+
+  .stegoshield-navbar-datetime-wrapper {
+    padding: 6px 16px;
+    gap: 10px;
+  }
+
+  .stegoshield-navbar-flag-wrapper {
+    width: 28px;
+    height: 28px;
+  }
+
+  .stegoshield-navbar-datetime-date {
+    font-size: 11px;
+  }
+
+  .stegoshield-navbar-datetime-time {
+    font-size: 13px;
+  }
+
+  .stegoshield-navbar-admin-avatar-wrapper {
+    width: 38px;
+    height: 38px;
+  }
+
+  .stegoshield-navbar-admin-name {
+    font-size: 13px;
+  }
+
+  .stegoshield-navbar-admin-role {
+    font-size: 10px;
+  }
+
+  .stegoshield-navbar-btn-logout {
+    padding: 7px 18px;
+    font-size: 12px;
+  }
+
+  .stegoshield-navbar-divider {
+    height: 36px;
+  }
+}
+
+@media (max-width: 768px) {
+  .stegoshield-navbar {
+    padding: 10px 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .stegoshield-navbar-left {
+    flex: 1;
+  }
+
+  .stegoshield-navbar-right {
+    width: 100%;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .stegoshield-navbar-divider {
+    display: none;
+  }
+
+  .stegoshield-navbar-brand-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .stegoshield-navbar-brand-text h1 {
+    font-size: 18px;
+  }
+
+  .stegoshield-navbar-brand-text p {
+    font-size: 9px;
+  }
+
+  .stegoshield-navbar-datetime-wrapper {
+    padding: 5px 12px;
+    gap: 8px;
+  }
+
+  .stegoshield-navbar-flag-wrapper {
+    width: 24px;
+    height: 24px;
+  }
+
+  .stegoshield-navbar-datetime-date {
+    display: none;
+  }
+
+  .stegoshield-navbar-datetime-separator {
+    display: none;
+  }
+
+  .stegoshield-navbar-datetime-time {
+    font-size: 12px;
+  }
+
+  .stegoshield-navbar-admin-info {
+    padding: 4px 10px;
+  }
+
+  .stegoshield-navbar-admin-avatar-wrapper {
+    width: 34px;
+    height: 34px;
+  }
+
+  .stegoshield-navbar-btn-logout {
+    padding: 6px 14px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .stegoshield-navbar {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .stegoshield-navbar-right {
+    gap: 8px;
+  }
+
+  .stegoshield-navbar-brand-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .stegoshield-navbar-brand-logo {
+    transform: scale(1.1);
+  }
+
+  .stegoshield-navbar-brand-text h1 {
+    font-size: 16px;
+  }
+
+  .stegoshield-navbar-brand-text p {
+    display: none;
+  }
+
+  .stegoshield-navbar-datetime-wrapper {
+    gap: 6px;
+    padding: 5px 10px;
+  }
+
+  .stegoshield-navbar-flag-wrapper {
+    width: 20px;
+    height: 20px;
+  }
+
+  .stegoshield-navbar-datetime-time {
+    font-size: 11px;
+  }
+
+  .stegoshield-navbar-admin-info {
+    padding: 4px;
+    gap: 0;
+  }
+
+  .stegoshield-navbar-admin-details {
+    display: none;
+  }
+
+  .stegoshield-navbar-admin-avatar-wrapper {
+    width: 30px;
+    height: 30px;
+  }
+
+  .stegoshield-navbar-btn-logout {
+    padding: 6px 10px;
+    font-size: 11px;
+    border-radius: 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .stegoshield-navbar {
+    padding: 7px 10px;
+  }
+
+  .stegoshield-navbar-brand {
+    gap: 10px;
+  }
+
+  .stegoshield-navbar-brand-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .stegoshield-navbar-brand-text h1 {
+    font-size: 14px;
+  }
+
+  .stegoshield-navbar-datetime-wrapper {
+    padding: 4px 8px;
+  }
+
+  .stegoshield-navbar-flag-wrapper {
+    width: 18px;
+    height: 18px;
+  }
+
+  .stegoshield-navbar-datetime-time {
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+
+  .stegoshield-navbar-admin-avatar-wrapper {
+    width: 28px;
+    height: 28px;
+  }
+
+  .stegoshield-navbar-btn-logout {
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+}
