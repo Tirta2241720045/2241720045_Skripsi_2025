@@ -1,9 +1,8 @@
 import axios from 'axios';
 
 const API = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+  baseURL: 'http://localhost:8000',
   headers: {
-    'ngrok-skip-browser-warning': 'true',
     'Content-Type': 'application/json',
   },
 });

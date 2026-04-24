@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from '../../components/shared/Navbar';
 import { getAllPatients, createPatient, updatePatient, deletePatient, PatientResponse, Gender } from '../../api/patients';
-import { getMedicalRecordsByPatient, uploadMedicalData, MedicalRecordItem } from '../../api/medical';
+import { getMedicalRecordsByPatient, uploadMedicalData, deleteMedicalRecord, MedicalRecordItem } from '../../api/medical';
 import '../../styles/DashboardStaff.css';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -93,7 +93,6 @@ const validateImageFile = async (file: File, expectedType: 'color' | 'grayscale'
     const data = imageData.data;
     let colorCount = 0;
     const totalPixels = Math.min(data.length / 4, 10000);
-
     for (let i = 0; i < totalPixels * 4; i += 4) {
       const r = data[i], g = data[i + 1], b = data[i + 2];
       if (Math.abs(r - g) > 10 || Math.abs(g - b) > 10 || Math.abs(r - b) > 10) {
@@ -101,7 +100,6 @@ const validateImageFile = async (file: File, expectedType: 'color' | 'grayscale'
         if (colorCount > totalPixels * 0.1) { isColorDetected = true; break; }
       }
     }
-
     isGrayscale = !isColorDetected;
     if (expectedType === 'color' && isGrayscale) errors.push('Patient Photo must be color image');
     if (expectedType === 'grayscale' && !isGrayscale) errors.push('MRI Image must be grayscale');
@@ -158,18 +156,23 @@ const DashboardStaff = () => {
   const [patients, setPatients] = useState<PatientResponse[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<PatientResponse | null>(null);
   const [patientPhotos, setPatientPhotos] = useState<Record<number, string>>({});
-  const [medicalRecord, setMedicalRecord] = useState<MedicalRecordItem | null>(null);
-  const [diagnosisContent, setDiagnosisContent] = useState<string>('');
-  const [staffAnnotation, setStaffAnnotation] = useState<string>('');
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
+  const [medicalRecords, setMedicalRecords] = useState<MedicalRecordItem[]>([]);
+  const [activeRecordIndex, setActiveRecordIndex] = useState(0);
+  const [diagnosisContents, setDiagnosisContents] = useState<Record<number, string>>({});
+  const [staffAnnotations, setStaffAnnotations] = useState<Record<number, string>>({});
+
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [showUploadPanel, setShowUploadPanel] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteRecordConfirm, setShowDeleteRecordConfirm] = useState<number | null>(null);
   const [notification, setNotification] = useState<{ show: boolean; message: string; type: string }>({ show: false, message: '', type: 'success' });
   const [search, setSearch] = useState('');
   const [registerSuccess, setRegisterSuccess] = useState(false);
   const [newPatientId, setNewPatientId] = useState<number | null>(null);
+  const [isRegistering, setIsRegistering] = useState(false); 
 
   const [registerForm, setRegisterForm] = useState({ full_name: '', date_of_birth: '', gender: 'M' as Gender });
   const [editForm, setEditForm] = useState({ medical_record_no: '', full_name: '', date_of_birth: '', gender: 'M' as Gender });
@@ -191,6 +194,8 @@ const DashboardStaff = () => {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pipelineOpen, setPipelineOpen] = useState(false);
+
+  const activeRecord = medicalRecords[activeRecordIndex] ?? null;
 
   const showNotification = useCallback((message: string, type: string) => {
     setNotification({ show: true, message, type });
@@ -225,26 +230,26 @@ const DashboardStaff = () => {
     } catch { showNotification('Failed to load patient data', 'error'); }
   }, [showNotification]);
 
-  const loadMedicalRecord = useCallback(async (patientId: number) => {
+  const loadMedicalRecords = useCallback(async (patientId: number) => {
     try {
       const result = await getMedicalRecordsByPatient(patientId);
-      if (result.records?.length > 0) {
-        const record = result.records[0];
-        setMedicalRecord(record);
-        if (record.medical_data_path) {
-          const content = await fetchTextContent(record.medical_data_path);
-          setDiagnosisContent(content);
+      const records = result.records ?? [];
+      setMedicalRecords(records);
+      setActiveRecordIndex(0);
+
+      const contents: Record<number, string> = {};
+      await Promise.allSettled(records.map(async (rec) => {
+        if (rec.medical_data_path) {
+          contents[rec.record_id] = await fetchTextContent(rec.medical_data_path);
         } else {
-          setDiagnosisContent('');
+          contents[rec.record_id] = '';
         }
-      } else {
-        setMedicalRecord(null);
-        setDiagnosisContent('');
-      }
-      setStaffAnnotation('');
+      }));
+      setDiagnosisContents(contents);
+      setStaffAnnotations({});
     } catch {
-      setMedicalRecord(null);
-      setDiagnosisContent('');
+      setMedicalRecords([]);
+      setDiagnosisContents({});
     }
   }, []);
 
@@ -252,7 +257,7 @@ const DashboardStaff = () => {
 
   useEffect(() => {
     if (selectedPatient) {
-      loadMedicalRecord(selectedPatient.patient_id);
+      loadMedicalRecords(selectedPatient.patient_id);
       setEditForm({
         medical_record_no: selectedPatient.medical_record_no,
         full_name: selectedPatient.full_name,
@@ -260,14 +265,15 @@ const DashboardStaff = () => {
         gender: selectedPatient.gender,
       });
     } else {
-      setMedicalRecord(null);
-      setDiagnosisContent('');
+      setMedicalRecords([]);
+      setDiagnosisContents({});
     }
     setIsProcessing(false);
     setProcessComplete(false);
     setShowEditForm(false);
+    setShowUploadPanel(false);
     setProcessSteps(DEFAULT_PROCESS_STEPS.map(s => ({ ...s })));
-  }, [selectedPatient, loadMedicalRecord]);
+  }, [selectedPatient, loadMedicalRecords]);
 
   const generateMedicalRecordNo = useCallback((): string => {
     const nums = patients
@@ -282,8 +288,24 @@ const DashboardStaff = () => {
 
   const getPatientPhoto = (patientId: number): string | null => {
     if (patientPhotos[patientId]) return patientPhotos[patientId];
-    if (selectedPatient?.patient_id === patientId && medicalRecord) return toUrl(medicalRecord.stego_photo_path);
+    if (selectedPatient?.patient_id === patientId && medicalRecords.length > 0)
+      return toUrl(medicalRecords[0].stego_photo_path);
     return null;
+  };
+
+  const resetUploadForm = () => {
+    setPatientPhotoFile(null);
+    setMriImageFile(null);
+    setDiagnosisFile(null);
+    setPatientPhotoPreview(null);
+    setMriImagePreview(null);
+    setDiagnosisPreview(null);
+    setPatientPhotoValidation(null);
+    setMriImageValidation(null);
+    setDiagnosisValidation(null);
+    setProcessSteps(DEFAULT_PROCESS_STEPS.map(s => ({ ...s })));
+    setIsProcessing(false);
+    setProcessComplete(false);
   };
 
   const processPatientPhoto = async (file: File) => {
@@ -335,15 +357,13 @@ const DashboardStaff = () => {
     if (selectedPatient?.patient_id === patient.patient_id) {
       setSelectedPatient(null);
       setIsRegisterMode(false);
-      setShowEditForm(false);
-      setRegisterSuccess(false);
     } else {
       setSelectedPatient(patient);
       setIsRegisterMode(false);
-      setShowEditForm(false);
-      setRegisterSuccess(false);
+      setShowUploadPanel(false);
     }
     setSidebarOpen(false);
+    setRegisterSuccess(false); 
   };
 
   const handleRegisterClick = () => {
@@ -353,15 +373,7 @@ const DashboardStaff = () => {
     setRegisterSuccess(false);
     setNewPatientId(null);
     setRegisterForm({ full_name: '', date_of_birth: '', gender: 'M' });
-    setPatientPhotoFile(null);
-    setMriImageFile(null);
-    setDiagnosisFile(null);
-    setPatientPhotoPreview(null);
-    setMriImagePreview(null);
-    setDiagnosisPreview(null);
-    setPatientPhotoValidation(null);
-    setMriImageValidation(null);
-    setDiagnosisValidation(null);
+    resetUploadForm();
     setSidebarOpen(false);
   };
 
@@ -381,6 +393,7 @@ const DashboardStaff = () => {
       return;
     }
     const mrNo = generateMedicalRecordNo();
+    setIsRegistering(true);
     try {
       const newPatient = await createPatient({
         medical_record_no: mrNo,
@@ -389,16 +402,20 @@ const DashboardStaff = () => {
         gender: registerForm.gender,
       });
       showNotification(`Patient registered — ${mrNo}`, 'success');
-      setRegisterSuccess(true);
-      setNewPatientId(newPatient.patient_id);
-      await loadPatients();
+      
+      setTimeout(() => {
+        setRegisterSuccess(true);
+        setNewPatientId(newPatient.patient_id);
+        loadPatients();
+        setIsRegistering(false);
+      }, 500);
     } catch (err: any) {
       showNotification(err?.response?.data?.detail || 'Failed to register patient', 'error');
+      setIsRegistering(false);
     }
   };
 
-  const handleUploadFromRegistration = async () => {
-    if (!newPatientId) return;
+  const handleUploadMedical = async (targetPatientId: number) => {
     if (!patientPhotoFile || !mriImageFile || !diagnosisFile) {
       showNotification('All files are required', 'warning');
       return;
@@ -412,27 +429,55 @@ const DashboardStaff = () => {
       const photoBlob = await autoCropSquare(patientPhotoPreview!);
       const mriBlob = await autoCropSquare(mriImagePreview!);
       const fd = new FormData();
-      fd.append('patient_id', newPatientId.toString());
+      fd.append('patient_id', targetPatientId.toString());
       fd.append('medical_data', diagnosisFile, diagnosisFile.name);
       fd.append('mri_image', new File([mriBlob], 'mri.png', { type: 'image/png' }));
       fd.append('patient_photo', new File([photoBlob], 'photo.png', { type: 'image/png' }));
       const [result] = await Promise.all([uploadMedicalData(fd), runProcessSteps()]);
       showNotification(`Record #${result.record_id} saved successfully`, 'success');
-      setSelectedPatient(patients.find(p => p.patient_id === newPatientId) || null);
-      setIsRegisterMode(false);
-      setRegisterSuccess(false);
-      setNewPatientId(null);
-      await loadMedicalRecord(newPatientId);
-      const updated = await getMedicalRecordsByPatient(newPatientId);
+
+      await loadMedicalRecords(targetPatientId);
+      const updated = await getMedicalRecordsByPatient(targetPatientId);
       if (updated.records?.length > 0) {
-        setPatientPhotos(prev => ({ ...prev, [newPatientId]: toUrl(updated.records[0].stego_photo_path) }));
+        setPatientPhotos(prev => ({ ...prev, [targetPatientId]: toUrl(updated.records[0].stego_photo_path) }));
       }
-    } catch {
-      showNotification('Upload failed — please try again', 'error');
+
+      if (isRegisterMode && newPatientId) {
+        const newPat = patients.find(p => p.patient_id === newPatientId);
+        if (newPat) setSelectedPatient(newPat);
+        setIsRegisterMode(false);
+        setRegisterSuccess(false);
+        setNewPatientId(null);
+      }
+
+      setShowUploadPanel(false);
+      resetUploadForm();
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || '';
+      showNotification(detail || 'Upload failed — please try again', 'error');
       setIsProcessing(false);
       setProcessSteps(DEFAULT_PROCESS_STEPS.map(s => ({ ...s })));
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleDeleteRecord = async (recordId: number) => {
+    try {
+      await deleteMedicalRecord(recordId);
+      showNotification(`Record #${recordId} deleted`, 'success');
+      setShowDeleteRecordConfirm(null);
+      if (selectedPatient) {
+        await loadMedicalRecords(selectedPatient.patient_id);
+        const updated = await getMedicalRecordsByPatient(selectedPatient.patient_id);
+        if (updated.records?.length > 0) {
+          setPatientPhotos(prev => ({ ...prev, [selectedPatient.patient_id]: toUrl(updated.records[0].stego_photo_path) }));
+        } else {
+          setPatientPhotos(prev => { const n = { ...prev }; delete n[selectedPatient.patient_id]; return n; });
+        }
+      }
+    } catch (err: any) {
+      showNotification(err?.response?.data?.detail || 'Failed to delete record', 'error');
     }
   };
 
@@ -484,49 +529,6 @@ const DashboardStaff = () => {
     }
   };
 
-  const handleUploadMedical = async () => {
-    if (!selectedPatient || !patientPhotoFile || !mriImageFile || !diagnosisFile) {
-      showNotification('All files are required', 'warning');
-      return;
-    }
-    if (!patientPhotoValidation?.isValid || !mriImageValidation?.isValid || !diagnosisValidation?.isValid) {
-      showNotification('Validation failed', 'error');
-      return;
-    }
-    setIsUploading(true);
-    try {
-      const photoBlob = await autoCropSquare(patientPhotoPreview!);
-      const mriBlob = await autoCropSquare(mriImagePreview!);
-      const fd = new FormData();
-      fd.append('patient_id', selectedPatient.patient_id.toString());
-      fd.append('medical_data', diagnosisFile, diagnosisFile.name);
-      fd.append('mri_image', new File([mriBlob], 'mri.png', { type: 'image/png' }));
-      fd.append('patient_photo', new File([photoBlob], 'photo.png', { type: 'image/png' }));
-      const [result] = await Promise.all([uploadMedicalData(fd), runProcessSteps()]);
-      showNotification(`Record #${result.record_id} saved successfully`, 'success');
-      await loadMedicalRecord(selectedPatient.patient_id);
-      const updated = await getMedicalRecordsByPatient(selectedPatient.patient_id);
-      if (updated.records?.length > 0) {
-        setPatientPhotos(prev => ({ ...prev, [selectedPatient.patient_id]: toUrl(updated.records[0].stego_photo_path) }));
-      }
-      setPatientPhotoFile(null);
-      setMriImageFile(null);
-      setDiagnosisFile(null);
-      setPatientPhotoPreview(null);
-      setMriImagePreview(null);
-      setDiagnosisPreview(null);
-      setPatientPhotoValidation(null);
-      setMriImageValidation(null);
-      setDiagnosisValidation(null);
-    } catch {
-      showNotification('Upload failed — please try again', 'error');
-      setIsProcessing(false);
-      setProcessSteps(DEFAULT_PROCESS_STEPS.map(s => ({ ...s })));
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   const generatePDF = async (element: HTMLDivElement, filename: string) => {
     document.body.appendChild(element);
     try {
@@ -565,25 +567,27 @@ const DashboardStaff = () => {
   const nl2br = (s: string) => esc(s).replace(/\n/g, '<br/>');
 
   const handleDownloadReport = async () => {
-    if (!selectedPatient) return;
+    if (!selectedPatient || !activeRecord) return;
     const doctorName = user.full_name || 'Staff';
+    const content = diagnosisContents[activeRecord.record_id] || '';
+    const annotation = staffAnnotations[activeRecord.record_id] || '';
     const html = `
       <div style="margin-bottom:24px;">
         <div style="font-size:22px;font-weight:700;color:#0d1117;text-align:center;margin-bottom:6px;">Medical Record Report</div>
         <div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #e0e4ea;padding-bottom:10px;">
           <div><span style="font-size:13px;color:#667;">Patient:</span><span style="font-size:15px;font-weight:600;color:#0d1117;margin-left:6px;">${esc(selectedPatient.full_name)}</span></div>
-          <div><span style="font-size:12px;color:#667;">MR: ${esc(selectedPatient.medical_record_no)}</span></div>
+          <div><span style="font-size:12px;color:#667;">MR: ${esc(selectedPatient.medical_record_no)} · Record #${activeRecord.record_id}</span></div>
         </div>
       </div>
       <table style="width:100%;border-collapse:collapse;">
-        <thead><tr>
+        <thead></table>
           <th style="background:#f0f2f6;border:1px solid #ccc;padding:8px 14px;font-size:10px;font-weight:700;text-align:left;">Section</th>
           <th style="background:#f0f2f6;border:1px solid #ccc;padding:8px 14px;font-size:10px;font-weight:700;text-align:left;">Content</th>
         </tr></thead>
         <tbody>
           <tr><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;font-weight:600;">Stego Image</td><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;">Embedded image available in system</td></tr>
-          <tr><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;font-weight:600;">Diagnosis & Notes</td><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;">${nl2br(diagnosisContent || '(no data available)')}</td></tr>
-          <tr><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;font-weight:600;">Staff's Annotation</td><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;">${nl2br(staffAnnotation || '(no annotation)')}</td></tr>
+          <tr><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;font-weight:600;">Diagnosis & Notes</td><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;">${nl2br(content || '(no data available)')}</td></tr>
+          <tr><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;font-weight:600;">Staff's Annotation</td><td style="border:1px solid #ccc;padding:12px 14px;vertical-align:top;">${nl2br(annotation || '(no annotation)')}</td></tr>
         </tbody>
       </table>
       <div style="margin-top:24px;text-align:right;">
@@ -593,131 +597,163 @@ const DashboardStaff = () => {
     await generatePDF(buildReportElement(html), `Medical_Report_${selectedPatient.medical_record_no}_${todayFilename()}.pdf`);
   };
 
-  const embedMetrics = medicalRecord?.quality_metrics?.embedding;
-  const latestMetrics = embedMetrics ?? null;
   const filteredPatients = patients.filter(p =>
     p.full_name.toLowerCase().includes(search.toLowerCase()) ||
     p.medical_record_no.toLowerCase().includes(search.toLowerCase())
   );
   const hasPatients = patients.length > 0;
-
   const canUpload = !!patientPhotoFile && !!mriImageFile && !!diagnosisFile &&
     !!patientPhotoValidation?.isValid && !!mriImageValidation?.isValid && !!diagnosisValidation?.isValid;
 
+  const latestMetrics = activeRecord?.quality_metrics?.embedding ?? null;
+
   const renderUploadGrid = (photoInputId: string, mriInputId: string, diagInputId: string) => (
-    <div className="upload-grid-container">
-      <div className="upload-row">
-        <div className="upload-card">
-          <div className="upload-card-header">
-            <span className="upload-card-icon">📷</span>
+    <div className="upload-grid-3col">
+      <div className="upload-card-modern">
+        <div className="upload-card-header-modern">
+          <span className="upload-card-icon">📷</span>
+          <div className="upload-card-title-group">
             <span className="upload-card-title">Patient Photo</span>
-            <span className="upload-card-badge">COLOR</span>
-          </div>
-          <div className="upload-card-body">
-            <div
-              className={`upload-dropzone ${patientPhotoPreview ? 'has-file' : ''} ${patientPhotoValidation?.isValid === false ? 'error' : ''}`}
-              onClick={() => document.getElementById(photoInputId)?.click()}
-            >
-              {patientPhotoPreview ? (
-                <img src={patientPhotoPreview} alt="Preview" />
-              ) : (
-                <div className="upload-placeholder">
-                  <span>Click or drag to upload</span>
-                  <small>PNG, JPG (max 10MB)</small>
-                </div>
-              )}
-            </div>
-            <input
-              id={photoInputId}
-              type="file"
-              accept="image/png,image/jpeg,image/jpg"
-              onChange={e => { const f = e.target.files?.[0]; if (f) processPatientPhoto(f); }}
-              style={{ display: 'none' }}
-            />
-            {patientPhotoValidation && (
-              <div className={`upload-feedback ${patientPhotoValidation.isValid ? 'success' : 'error'}`}>
-                <span>{patientPhotoValidation.isValid ? '✓ Valid' : '✕ Invalid'}</span>
-                <span>{(patientPhotoValidation.size / 1024).toFixed(0)} KB</span>
-                {patientPhotoValidation.errors.map((err, i) => <span key={i}>{err}</span>)}
-              </div>
-            )}
+            <span className="upload-card-badge-modern color">COLOR</span>
           </div>
         </div>
-
-        <div className="upload-card">
-          <div className="upload-card-header">
-            <span className="upload-card-icon">🩻</span>
-            <span className="upload-card-title">MRI Image</span>
-            <span className="upload-card-badge">GRAYSCALE</span>
-          </div>
-          <div className="upload-card-body">
-            <div
-              className={`upload-dropzone ${mriImagePreview ? 'has-file' : ''} ${mriImageValidation?.isValid === false ? 'error' : ''}`}
-              onClick={() => document.getElementById(mriInputId)?.click()}
-            >
-              {mriImagePreview ? (
-                <img src={mriImagePreview} alt="Preview" />
-              ) : (
-                <div className="upload-placeholder">
-                  <span>Click or drag to upload</span>
-                  <small>PNG, JPG (max 10MB)</small>
-                </div>
-              )}
-            </div>
-            <input
-              id={mriInputId}
-              type="file"
-              accept="image/png,image/jpeg,image/jpg"
-              onChange={e => { const f = e.target.files?.[0]; if (f) processMriImage(f); }}
-              style={{ display: 'none' }}
-            />
-            {mriImageValidation && (
-              <div className={`upload-feedback ${mriImageValidation.isValid ? 'success' : 'error'}`}>
-                <span>{mriImageValidation.isValid ? '✓ Valid' : '✕ Invalid'}</span>
-                <span>{(mriImageValidation.size / 1024).toFixed(0)} KB</span>
-                {mriImageValidation.errors.map((err, i) => <span key={i}>{err}</span>)}
+        <div className="upload-card-body-modern">
+          <div
+            className={`upload-square ${patientPhotoPreview ? 'has-file' : ''} ${patientPhotoValidation?.isValid === false ? 'error' : ''}`}
+            onClick={() => document.getElementById(photoInputId)?.click()}
+          >
+            {patientPhotoPreview ? (
+              <img src={patientPhotoPreview} alt="Preview" />
+            ) : (
+              <div className="upload-placeholder-modern">
+                <span className="placeholder-icon">🖼️</span>
+                <span>Click to upload</span>
+                <small>PNG, JPG (max 10MB)</small>
               </div>
             )}
           </div>
+          <input id={photoInputId} type="file" accept="image/png,image/jpeg,image/jpg"
+            onChange={e => { const f = e.target.files?.[0]; if (f) processPatientPhoto(f); }}
+            style={{ display: 'none' }} />
+          {patientPhotoValidation && (
+            <div className={`upload-status ${patientPhotoValidation.isValid ? 'success' : 'error'}`}>
+              {patientPhotoValidation.isValid ? '✓ Valid' : '✕ Invalid'}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="upload-card upload-card-full">
-        <div className="upload-card-header">
-          <span className="upload-card-icon">📄</span>
-          <span className="upload-card-title">Diagnosis & Medical Notes</span>
-          <span className="upload-card-badge">TXT</span>
+      <div className="upload-card-modern">
+        <div className="upload-card-header-modern">
+          <span className="upload-card-icon">🩻</span>
+          <div className="upload-card-title-group">
+            <span className="upload-card-title">MRI Image</span>
+            <span className="upload-card-badge-modern grayscale">GRAYSCALE</span>
+          </div>
         </div>
-        <div className="upload-card-body">
+        <div className="upload-card-body-modern">
           <div
-            className={`upload-dropzone upload-dropzone-text ${diagnosisPreview ? 'has-file' : ''} ${diagnosisValidation?.isValid === false ? 'error' : ''}`}
-            onClick={() => document.getElementById(diagInputId)?.click()}
+            className={`upload-square ${mriImagePreview ? 'has-file' : ''} ${mriImageValidation?.isValid === false ? 'error' : ''}`}
+            onClick={() => document.getElementById(mriInputId)?.click()}
           >
-            {diagnosisPreview ? (
-              <pre className="upload-text-preview">{diagnosisPreview}</pre>
+            {mriImagePreview ? (
+              <img src={mriImagePreview} alt="Preview" />
             ) : (
-              <div className="upload-placeholder">
-                <span>Click or drag to upload</span>
-                <small>TXT file (max 5MB)</small>
+              <div className="upload-placeholder-modern">
+                <span className="placeholder-icon">🩻</span>
+                <span>Click to upload</span>
+                <small>PNG, JPG (max 10MB)</small>
               </div>
             )}
           </div>
-          <input
-            id={diagInputId}
-            type="file"
-            accept=".txt,text/plain"
-            onChange={e => { const f = e.target.files?.[0]; if (f) processDiagnosisFile(f); }}
-            style={{ display: 'none' }}
-          />
-          {diagnosisValidation && (
-            <div className={`upload-feedback ${diagnosisValidation.isValid ? 'success' : 'error'}`}>
-              <span>{diagnosisValidation.isValid ? '✓ Valid' : '✕ Invalid'}</span>
-              <span>{(diagnosisValidation.size / 1024).toFixed(0)} KB</span>
-              <span>{diagnosisValidation.lineCount} lines</span>
-              <span>{diagnosisValidation.charCount} chars</span>
-              {diagnosisValidation.errors.map((err, i) => <span key={i}>{err}</span>)}
+          <input id={mriInputId} type="file" accept="image/png,image/jpeg,image/jpg"
+            onChange={e => { const f = e.target.files?.[0]; if (f) processMriImage(f); }}
+            style={{ display: 'none' }} />
+          {mriImageValidation && (
+            <div className={`upload-status ${mriImageValidation.isValid ? 'success' : 'error'}`}>
+              {mriImageValidation.isValid ? '✓ Valid' : '✕ Invalid'}
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="upload-card-modern">
+        <div className="upload-card-header-modern">
+          <span className="upload-card-icon">📄</span>
+          <div className="upload-card-title-group">
+            <span className="upload-card-title">Medical Notes</span>
+            <span className="upload-card-badge-modern text">TXT</span>
+          </div>
+        </div>
+        <div className="upload-card-body-modern">
+          <div
+            className={`upload-square-text ${diagnosisPreview ? 'has-file' : ''} ${diagnosisValidation?.isValid === false ? 'error' : ''}`}
+            onClick={() => document.getElementById(diagInputId)?.click()}
+          >
+            {diagnosisPreview ? (
+              <pre className="text-preview">{diagnosisPreview.slice(0, 500)}</pre>
+            ) : (
+              <div className="upload-placeholder-modern">
+                <span className="placeholder-icon">📝</span>
+                <span>Click to upload</span>
+                <small>TXT (max 5MB)</small>
+              </div>
+            )}
+          </div>
+          <input id={diagInputId} type="file" accept=".txt,text/plain"
+            onChange={e => { const f = e.target.files?.[0]; if (f) processDiagnosisFile(f); }}
+            style={{ display: 'none' }} />
+          {diagnosisValidation && (
+            <div className={`upload-status ${diagnosisValidation.isValid ? 'success' : 'error'}`}>
+              {diagnosisValidation.isValid ? '✓ Valid' : '✕ Invalid'}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderModernAddRecordPanel = () => (
+    <div className="modern-add-record-panel">
+      <div className="modern-add-record-header">
+        <div className="modern-add-record-title">
+          <span className="title-icon">➕</span>
+          <div>
+            <h3>Add New Medical Record</h3>
+            <p>Upload patient photo, MRI scan, and medical notes for steganography embedding</p>
+          </div>
+        </div>
+        <button 
+          className="modern-close-btn"
+          onClick={() => setShowUploadPanel(false)}
+        >
+          ✕
+        </button>
+      </div>
+      
+      <div className="modern-add-record-body">
+        {renderUploadGrid('addPatientPhotoInput', 'addMriImageInput', 'addDiagnosisInput')}
+        
+        <div className="modern-upload-actions">
+          <button className="modern-btn-cancel" onClick={() => { setShowUploadPanel(false); resetUploadForm(); }}>
+            Cancel
+          </button>
+          <button 
+            className={`modern-btn-upload ${(!canUpload || isUploading) ? 'disabled' : ''}`}
+            onClick={() => selectedPatient && handleUploadMedical(selectedPatient.patient_id)}
+            disabled={!canUpload || isUploading}
+          >
+            {isUploading ? (
+              <>
+                <span className="spin"></span>
+                Processing...
+              </>
+            ) : (
+              <>
+                🚀 Upload & Encrypt
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>
@@ -755,12 +791,12 @@ const DashboardStaff = () => {
           <div className="ddc-pl-info-icon">⚙️</div>
           <div className="ddc-pl-info-body">
             <span className="ddc-pl-info-title">Processing...</span>
-            <p>Pipeline is running. Each layer is being processed sequentially — encryption, embedding into MRI, embedding into photo, and finalization.</p>
+            <p>Pipeline is running. Each layer is being processed sequentially.</p>
           </div>
         </div>
       )}
 
-      {processComplete && latestMetrics && (
+      {(processComplete || (!isProcessing && !processComplete && latestMetrics)) && latestMetrics && (
         <>
           <div className="pl-metrics">
             <div className="pl-metrics-hd">Quality Metrics</div>
@@ -772,32 +808,25 @@ const DashboardStaff = () => {
                     {key === 'layer1_mri_stego' ? 'Layer 1 — MRI' : 'Layer 2 — Photo'}
                   </div>
                   <div className="pl-metrics-badges-vertical">
-                    <div className="mbadge">
-                      <span className="mbadge-l">MSE</span>
-                      <span className="mbadge-v">{m.mse.toFixed(3)}</span>
-                    </div>
+                    <div className="mbadge"><span className="mbadge-l">MSE</span><span className="mbadge-v">{m.mse.toFixed(3)}</span></div>
                     <div className={`mbadge ${m.psnr >= 40 ? 'good' : m.psnr >= 30 ? 'ok' : 'bad'}`}>
-                      <span className="mbadge-l">PSNR</span>
-                      <span className="mbadge-v">{m.psnr.toFixed(1)} dB</span>
+                      <span className="mbadge-l">PSNR</span><span className="mbadge-v">{m.psnr.toFixed(1)} dB</span>
                     </div>
                     <div className={`mbadge ${m.ssim >= 0.95 ? 'good' : m.ssim >= 0.85 ? 'ok' : 'bad'}`}>
-                      <span className="mbadge-l">SSIM</span>
-                      <span className="mbadge-v">{m.ssim.toFixed(4)}</span>
+                      <span className="mbadge-l">SSIM</span><span className="mbadge-v">{m.ssim.toFixed(4)}</span>
                     </div>
                   </div>
                 </div>
               );
             })}
           </div>
-          {medicalRecord?.file_sizes && (
-            <div className="pl-metrics" style={{ marginTop: '8px' }}>
+          {activeRecord?.file_sizes && (
+            <div className="pl-metrics" style={{ marginTop: '6px' }}>
               <div className="pl-metrics-hd">File Size</div>
               <div className="pl-filesize-block">
                 <div className="pl-filesize-row">
                   <span className="pl-filesize-label">Stego Image</span>
-                  <span className="pl-filesize-val">
-                    {medicalRecord.file_sizes.stego_kb ? `${medicalRecord.file_sizes.stego_kb} KB` : '—'}
-                  </span>
+                  <span className="pl-filesize-val">{activeRecord.file_sizes.stego_kb ? `${activeRecord.file_sizes.stego_kb} KB` : '—'}</span>
                 </div>
               </div>
             </div>
@@ -806,7 +835,7 @@ const DashboardStaff = () => {
             <div className="ddc-pl-info-icon">✅</div>
             <div className="ddc-pl-info-body">
               <span className="ddc-pl-info-title">Embedding Complete</span>
-              <p>All pipeline stages completed successfully. The medical record has been encrypted and embedded into the stego image.</p>
+              <p>All pipeline stages completed. Medical record encrypted and embedded into stego image.</p>
             </div>
           </div>
         </>
@@ -817,61 +846,9 @@ const DashboardStaff = () => {
           <div className="ddc-pl-info-icon">🔐</div>
           <div className="ddc-pl-info-body">
             <span className="ddc-pl-info-title">Ready to Process</span>
-            <p>Upload patient photo, MRI scan, and medical diagnosis. The system will encrypt and embed data using 2-layer LSB steganography.</p>
+            <p>Upload patient photo, MRI scan, and diagnosis. The system will encrypt and embed data using 2-layer LSB steganography.</p>
           </div>
         </div>
-      )}
-
-      {!isProcessing && !processComplete && latestMetrics && (
-        <>
-          <div className="pl-metrics">
-            <div className="pl-metrics-hd">Quality Metrics</div>
-            {(['layer1_mri_stego', 'layer2_photo_stego'] as const).map(key => {
-              const m = latestMetrics[key];
-              return (
-                <div className="pl-metrics-layer-group" key={key}>
-                  <div className="pl-metrics-layer-label">
-                    {key === 'layer1_mri_stego' ? 'Layer 1 — MRI' : 'Layer 2 — Photo'}
-                  </div>
-                  <div className="pl-metrics-badges-vertical">
-                    <div className="mbadge">
-                      <span className="mbadge-l">MSE</span>
-                      <span className="mbadge-v">{m.mse.toFixed(3)}</span>
-                    </div>
-                    <div className={`mbadge ${m.psnr >= 40 ? 'good' : m.psnr >= 30 ? 'ok' : 'bad'}`}>
-                      <span className="mbadge-l">PSNR</span>
-                      <span className="mbadge-v">{m.psnr.toFixed(1)} dB</span>
-                    </div>
-                    <div className={`mbadge ${m.ssim >= 0.95 ? 'good' : m.ssim >= 0.85 ? 'ok' : 'bad'}`}>
-                      <span className="mbadge-l">SSIM</span>
-                      <span className="mbadge-v">{m.ssim.toFixed(4)}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {medicalRecord?.file_sizes && (
-            <div className="pl-metrics" style={{ marginTop: '8px' }}>
-              <div className="pl-metrics-hd">File Size</div>
-              <div className="pl-filesize-block">
-                <div className="pl-filesize-row">
-                  <span className="pl-filesize-label">Stego Image</span>
-                  <span className="pl-filesize-val">
-                    {medicalRecord.file_sizes.stego_kb ? `${medicalRecord.file_sizes.stego_kb} KB` : '—'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-          <div className="ddc-pl-info ddc-pl-info-done">
-            <div className="ddc-pl-info-icon">✅</div>
-            <div className="ddc-pl-info-body">
-              <span className="ddc-pl-info-title">Embedding Complete</span>
-              <p>All pipeline stages completed successfully. The medical record has been encrypted and embedded into the stego image.</p>
-            </div>
-          </div>
-        </>
       )}
     </>
   );
@@ -895,9 +872,7 @@ const DashboardStaff = () => {
       <div className={`ddc-pipeline-sheet ${pipelineOpen ? 'open' : ''}`}>
         <div className="ddc-pipeline-sheet-handle" />
         <button className="ddc-pipeline-sheet-close" onClick={() => setPipelineOpen(false)}>✕</button>
-        <div className="ddc-pipeline-sheet-inner">
-          {renderPipeline()}
-        </div>
+        <div className="ddc-pipeline-sheet-inner">{renderPipeline()}</div>
       </div>
 
       <div className="ddc-layout">
@@ -910,27 +885,18 @@ const DashboardStaff = () => {
               </div>
               <div className="ddc-sb-search">
                 <span>⌕</span>
-                <input
-                  placeholder="Name or Medical Record No."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                />
+                <input placeholder="Name or Medical Record No." value={search} onChange={e => setSearch(e.target.value)} />
                 {search && <button onClick={() => setSearch('')}>✕</button>}
               </div>
             </div>
             <div className="ddc-sb-list">
-              {filteredPatients.length === 0 ? (
-                <div className="ddc-sb-empty"><span>🔍</span><p>No patients found</p></div>
-              ) : (
-                filteredPatients.map(p => {
+              {filteredPatients.length === 0
+                ? <div className="ddc-sb-empty"><span>🔍</span><p>No patients found</p></div>
+                : filteredPatients.map(p => {
                   const photo = getPatientPhoto(p.patient_id);
                   const active = selectedPatient?.patient_id === p.patient_id;
                   return (
-                    <button
-                      key={p.patient_id}
-                      className={`ddc-sb-item ${active ? 'active' : ''}`}
-                      onClick={() => handlePatientClick(p)}
-                    >
+                    <button key={p.patient_id} className={`ddc-sb-item ${active ? 'active' : ''}`} onClick={() => handlePatientClick(p)}>
                       <div className={`ddc-av ddc-av-${p.gender}`}>
                         {photo ? <img src={photo} alt="" /> : p.full_name.charAt(0).toUpperCase()}
                       </div>
@@ -942,11 +908,8 @@ const DashboardStaff = () => {
                     </button>
                   );
                 })
-              )}
-              <button
-                className={`ddc-sb-item ddc-sb-item-register ${isRegisterMode ? 'active' : ''}`}
-                onClick={handleRegisterClick}
-              >
+              }
+              <button className={`ddc-sb-item ddc-sb-item-register ${isRegisterMode ? 'active' : ''}`} onClick={handleRegisterClick}>
                 <div className="ddc-av ddc-av-register">+</div>
                 <div className="ddc-sb-item-info">
                   <span className="ddc-sb-item-name">Register New Patient</span>
@@ -964,18 +927,15 @@ const DashboardStaff = () => {
                 👥 Patients <span className="ddc-mob-nav-count">{patients.length}</span>
               </button>
               {(selectedPatient || isRegisterMode) && (
-                <span className="ddc-mob-nav-label">
-                  {isRegisterMode ? 'Register Patient' : selectedPatient?.full_name}
-                </span>
+                <span className="ddc-mob-nav-label">{isRegisterMode ? 'Register Patient' : selectedPatient?.full_name}</span>
               )}
               <button className="ddc-mob-nav-btn ddc-mob-nav-btn-pipeline" onClick={() => setPipelineOpen(true)}>
-                ⚙️ Pipeline
-                {processComplete && <span className="ddc-mob-nav-done">✓</span>}
+                ⚙️ Pipeline {processComplete && <span className="ddc-mob-nav-done">✓</span>}
               </button>
             </div>
           )}
 
-          {!hasPatients && !isRegisterMode && !selectedPatient && (
+          {!hasPatients && !isRegisterMode && (
             <div className="ddc-welcome">
               <div className="ddc-welcome-inner">
                 <div className="ddc-welcome-ico">🏥</div>
@@ -988,9 +948,7 @@ const DashboardStaff = () => {
                   <div className="ddc-stat-sep" />
                   <div className="ddc-stat"><span className="ddc-stat-n">0</span><span className="ddc-stat-l">Female</span></div>
                 </div>
-                <button className="ddc-btn-primary" onClick={handleRegisterClick}>
-                  + Register New Patient
-                </button>
+                <button className="ddc-btn-primary" onClick={handleRegisterClick}>+ Register New Patient</button>
               </div>
             </div>
           )}
@@ -1019,24 +977,18 @@ const DashboardStaff = () => {
                   <span className="ddc-pbar-name">Register New Patient</span>
                   <div className="ddc-pbar-meta">Fill in the patient information below</div>
                 </div>
+                {registerSuccess && newPatientId && (
+                  <button className="ddc-btn-ext" onClick={() => handleUploadMedical(newPatientId!)}
+                    disabled={isUploading || !canUpload} style={{ padding: '6px 14px', fontSize: '11px' }}>
+                    {isUploading ? <><span className="spin" />Uploading...</> : <>Upload & Encrypt</>}
+                  </button>
+                )}
               </div>
               <div className="ddc-workspace">
                 <div className="ddc-content-panel">
                   <div className="ddc-tab-body">
                     <div className="ddc-card">
-                      <div className="card-hd">
-                        <span className="card-title">Patient Registration</span>
-                        {registerSuccess && newPatientId && (
-                          <button
-                            className="ddc-btn-ext"
-                            onClick={handleUploadFromRegistration}
-                            disabled={isUploading || !canUpload}
-                            style={{ padding: '6px 14px', fontSize: '11px' }}
-                          >
-                            {isUploading ? <><span className="spin" />Uploading...</> : <>Upload & Encrypt</>}
-                          </button>
-                        )}
-                      </div>
+                      <div className="card-hd"><span className="card-title">Patient Registration</span></div>
                       <div className="ds-register-form">
                         <div className="ds-form-group">
                           <label>Medical Record No.</label>
@@ -1045,53 +997,44 @@ const DashboardStaff = () => {
                         </div>
                         <div className="ds-form-group">
                           <label>Full Name *</label>
-                          <input
-                            type="text"
-                            className="ds-input"
-                            value={registerForm.full_name}
+                          <input type="text" className="ds-input" value={registerForm.full_name}
                             onChange={e => setRegisterForm({ ...registerForm, full_name: e.target.value })}
-                            placeholder="Patient full name"
-                            required
-                          />
+                            placeholder="Patient full name" required />
                         </div>
                         <div className="ds-form-row">
                           <div className="ds-form-group">
                             <label>Date of Birth *</label>
-                            <input
-                              type="date"
-                              className="ds-input"
-                              value={registerForm.date_of_birth}
+                            <input type="date" className="ds-input" value={registerForm.date_of_birth}
                               onChange={e => setRegisterForm({ ...registerForm, date_of_birth: e.target.value })}
-                              max={new Date().toISOString().split('T')[0]}
-                              required
-                            />
+                              max={new Date().toISOString().split('T')[0]} required />
                           </div>
                           <div className="ds-form-group">
                             <label>Gender *</label>
-                            <select
-                              className="ds-input ds-select"
-                              value={registerForm.gender}
-                              onChange={e => setRegisterForm({ ...registerForm, gender: e.target.value as Gender })}
-                            >
+                            <select className="ds-input ds-select" value={registerForm.gender}
+                              onChange={e => setRegisterForm({ ...registerForm, gender: e.target.value as Gender })}>
                               <option value="M">♂ Male</option>
                               <option value="F">♀ Female</option>
                             </select>
                           </div>
                         </div>
-
-                        {registerSuccess ? (
-                          <div className="ds-success-message-full">
-                            Patient registered successfully! Please upload medical data below.
+                        {isRegistering && (
+                          <div className="register-loading">
+                            <span className="spin"></span> Registering patient...
                           </div>
-                        ) : (
+                        )}
+                        {!isRegistering && !registerSuccess && (
                           <div className="ds-form-actions">
                             <button className="ddc-btn-secondary" onClick={() => setIsRegisterMode(false)}>Cancel</button>
                             <button className="ddc-btn-primary" onClick={handleCreatePatient}>Register Patient</button>
                           </div>
                         )}
-
+                        {!isRegistering && registerSuccess && (
+                          <div className="ds-success-message-full slide-down">
+                            <span>✅</span> Patient registered successfully! Please upload medical data below.
+                          </div>
+                        )}
                         {registerSuccess && (
-                          <div className="ds-upload-after-register">
+                          <div className="ds-upload-after-register slide-up">
                             {renderUploadGrid('regPatientPhotoInput', 'regMriImageInput', 'regDiagnosisInput')}
                           </div>
                         )}
@@ -1099,9 +1042,7 @@ const DashboardStaff = () => {
                     </div>
                   </div>
                 </div>
-                <div className="ddc-pipeline">
-                  {renderPipeline()}
-                </div>
+                <div className="ddc-pipeline">{renderPipeline()}</div>
               </div>
             </div>
           )}
@@ -1109,14 +1050,9 @@ const DashboardStaff = () => {
           {hasPatients && selectedPatient && !isRegisterMode && (
             <div className="ddc-detail">
               <div className="ddc-pbar">
-                <div
-                  className={`ddc-av ddc-av-lg ddc-av-${selectedPatient.gender} ddc-av-clickable`}
-                  onClick={() => {
-                    const photo = getPatientPhoto(selectedPatient.patient_id);
-                    if (photo) setLightboxSrc(photo);
-                  }}
-                  title="Click to zoom"
-                >
+                <div className={`ddc-av ddc-av-lg ddc-av-${selectedPatient.gender} ddc-av-clickable`}
+                  onClick={() => { const p = getPatientPhoto(selectedPatient.patient_id); if (p) setLightboxSrc(p); }}
+                  title="Click to zoom">
                   {getPatientPhoto(selectedPatient.patient_id)
                     ? <img src={getPatientPhoto(selectedPatient.patient_id)!} alt="" />
                     : selectedPatient.full_name.charAt(0).toUpperCase()
@@ -1133,6 +1069,12 @@ const DashboardStaff = () => {
                     <span>{calcAge(selectedPatient.date_of_birth)}</span>
                     <span className="sep ddc-pbar-meta-hide-sm">·</span>
                     <span className="ddc-pbar-meta-hide-sm">DOB: {formatDate(selectedPatient.date_of_birth)}</span>
+                    {medicalRecords.length > 0 && (
+                      <>
+                        <span className="sep">·</span>
+                        <span className="ddc-records-count">{medicalRecords.length} record{medicalRecords.length > 1 ? 's' : ''}</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="ddc-pbar-actions">
@@ -1143,42 +1085,27 @@ const DashboardStaff = () => {
 
               <div className="ddc-workspace">
                 <div className="ddc-content-panel">
-                  <div
-                    className={`ds-edit-panel-wrapper ${showEditForm ? 'ds-edit-panel-open' : ''}`}
-                    style={{ maxHeight: showEditForm ? '400px' : '0px' }}
-                  >
+                  <div className={`ds-edit-panel-wrapper ${showEditForm ? 'ds-edit-panel-open' : ''}`}
+                    style={{ maxHeight: showEditForm ? '260px' : '0px' }}>
                     <div className="ds-edit-panel">
-                      <div className="ds-edit-header">
-                        <span className="ds-edit-title">✎ Edit Patient Information</span>
-                      </div>
+                      <div className="ds-edit-header"><span className="ds-edit-title">✎ Edit Patient Information</span></div>
                       <div className="ds-edit-body">
                         <div className="ds-edit-field">
                           <label>Full Name</label>
-                          <input
-                            type="text"
-                            className="ds-input"
-                            value={editForm.full_name}
-                            onChange={e => setEditForm({ ...editForm, full_name: e.target.value })}
-                          />
+                          <input type="text" className="ds-input" value={editForm.full_name}
+                            onChange={e => setEditForm({ ...editForm, full_name: e.target.value })} />
                         </div>
                         <div className="ds-edit-row">
                           <div className="ds-edit-field">
                             <label>Date of Birth</label>
-                            <input
-                              type="date"
-                              className="ds-input"
-                              value={editForm.date_of_birth}
+                            <input type="date" className="ds-input" value={editForm.date_of_birth}
                               onChange={e => setEditForm({ ...editForm, date_of_birth: e.target.value })}
-                              max={new Date().toISOString().split('T')[0]}
-                            />
+                              max={new Date().toISOString().split('T')[0]} />
                           </div>
                           <div className="ds-edit-field">
                             <label>Gender</label>
-                            <select
-                              className="ds-input ds-select"
-                              value={editForm.gender}
-                              onChange={e => setEditForm({ ...editForm, gender: e.target.value as Gender })}
-                            >
+                            <select className="ds-input ds-select" value={editForm.gender}
+                              onChange={e => setEditForm({ ...editForm, gender: e.target.value as Gender })}>
                               <option value="M">♂ Male</option>
                               <option value="F">♀ Female</option>
                             </select>
@@ -1193,32 +1120,66 @@ const DashboardStaff = () => {
                   </div>
 
                   <div className="ddc-tab-body">
-                    {medicalRecord ? (
+                    {medicalRecords.length > 0 && (
+                      <div className="ddc-records-tabs">
+                        <div className="ddc-records-tab-list">
+                          {medicalRecords.map((rec, idx) => (
+                            <button
+                              key={rec.record_id}
+                              className={`ddc-records-tab ${idx === activeRecordIndex ? 'active' : ''}`}
+                              onClick={() => setActiveRecordIndex(idx)}
+                            >
+                              <span className="ddc-records-tab-num">#{rec.record_id}</span>
+                              <span className="ddc-records-tab-date">{formatDate(rec.upload_date ?? '')}</span>
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          className="ddc-btn-add-record"
+                          onClick={() => { setShowUploadPanel(!showUploadPanel); resetUploadForm(); }}
+                          disabled={medicalRecords.length >= 10}
+                          title={medicalRecords.length >= 10 ? 'Maximum 10 records reached' : 'Add new record'}
+                        >
+                          {showUploadPanel ? '✕ Cancel' : '+ Add Record'}
+                        </button>
+                      </div>
+                    )}
+
+                    {showUploadPanel && renderModernAddRecordPanel()}
+
+                    {medicalRecords.length === 0 && !showUploadPanel && (
+                      <div className="ddc-card ddc-empty-records">
+                        <div className="ddc-empty-records-inner">
+                          <span>🩻</span>
+                          <p>No medical records yet</p>
+                          <button className="ddc-btn-primary" onClick={() => { setShowUploadPanel(true); resetUploadForm(); }}>
+                            + Upload First Record
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {activeRecord && !showUploadPanel && (
                       <div className="ddc-card ddc-med-card">
                         <div className="card-hd">
                           <span className="card-title">Medical Record Overview</span>
                           <div className="card-hd-right">
-                            <span className="ddc-rec-badge">Record #{medicalRecord.record_id} · {formatDate(medicalRecord.upload_date ?? '')}</span>
+                            <span className="ddc-rec-badge">Record #{activeRecord.record_id} · {formatDate(activeRecord.upload_date ?? '')}</span>
                             <button className="btn-download" onClick={handleDownloadReport}>⬇ Download</button>
+                            <button className="btn-del-record"
+                              onClick={() => setShowDeleteRecordConfirm(activeRecord.record_id)}
+                              title="Delete this record">🗑</button>
                           </div>
                         </div>
                         <div className="ddc-med-body">
                           <div className="ddc-med-pane ddc-med-pane-stego">
                             <div className="ddc-med-pane-label">Stego Image</div>
                             <div className="ds-record-img-area">
-                              <div
-                                className="ds-record-img-sq ds-record-img-clickable"
-                                onClick={() => {
-                                  const stegoUrl = toUrl(medicalRecord.stego_photo_path);
-                                  if (stegoUrl) setLightboxSrc(stegoUrl);
-                                }}
-                                title="Click to zoom"
-                              >
-                                <img
-                                  src={toUrl(medicalRecord.stego_photo_path)}
-                                  alt="Stego"
-                                  onError={e => { (e.target as HTMLImageElement).src = noImg; }}
-                                />
+                              <div className="ds-record-img-sq ds-record-img-clickable"
+                                onClick={() => { const u = toUrl(activeRecord.stego_photo_path); if (u) setLightboxSrc(u); }}
+                                title="Click to zoom">
+                                <img src={toUrl(activeRecord.stego_photo_path)} alt="Stego"
+                                  onError={e => { (e.target as HTMLImageElement).src = noImg; }} />
                                 <span className="ds-img-zoom-overlay">🔍</span>
                               </div>
                             </div>
@@ -1227,44 +1188,23 @@ const DashboardStaff = () => {
                           <div className="ddc-med-pane">
                             <div className="ddc-med-pane-label">Diagnosis & Notes</div>
                             <div className="ddc-scrollbox">
-                              <pre className="ddc-pre">{diagnosisContent || '(no data available)'}</pre>
+                              <pre className="ddc-pre">{diagnosisContents[activeRecord.record_id] || '(no data available)'}</pre>
                             </div>
                           </div>
                           <div className="ddc-med-divider" />
                           <div className="ddc-med-pane">
                             <div className="ddc-med-pane-label">Staff's Annotation</div>
-                            <textarea
-                              className="ddc-annot-area"
+                            <textarea className="ddc-annot-area"
                               placeholder="Add clinical notes, observations, or annotations here…"
-                              value={staffAnnotation}
-                              onChange={e => setStaffAnnotation(e.target.value)}
-                            />
+                              value={staffAnnotations[activeRecord.record_id] || ''}
+                              onChange={e => setStaffAnnotations(prev => ({ ...prev, [activeRecord.record_id]: e.target.value }))} />
                           </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="ddc-card ddc-upload-full-height">
-                        <div className="card-hd">
-                          <span className="card-title">Upload Medical Record</span>
-                          <button
-                            className="ddc-btn-ext"
-                            onClick={handleUploadMedical}
-                            disabled={isUploading || !canUpload}
-                            style={{ padding: '6px 14px', fontSize: '11px' }}
-                          >
-                            {isUploading ? <><span className="spin" />Processing...</> : <>🚀 Upload & Encrypt</>}
-                          </button>
-                        </div>
-                        <div className="ds-upload-section">
-                          {renderUploadGrid('patientPhotoInput', 'mriImageInput', 'diagnosisInput')}
                         </div>
                       </div>
                     )}
                   </div>
                 </div>
-                <div className="ddc-pipeline">
-                  {renderPipeline()}
-                </div>
+                <div className="ddc-pipeline">{renderPipeline()}</div>
               </div>
             </div>
           )}
@@ -1275,8 +1215,7 @@ const DashboardStaff = () => {
         <div className="lightbox" onClick={() => setShowDeleteConfirm(false)}>
           <div className="ds-modal" onClick={e => e.stopPropagation()}>
             <div className="ds-modal-head ds-modal-head-danger">
-              <span>⚠️</span>
-              <h3>Delete Patient Data</h3>
+              <span>⚠️</span><h3>Delete Patient Data</h3>
             </div>
             <div className="ds-modal-body">
               <p>You are about to permanently delete this patient and all medical records.</p>
@@ -1284,8 +1223,7 @@ const DashboardStaff = () => {
                 <div className={`ds-modal-avatar ds-avatar-${selectedPatient.gender}`}>
                   {getPatientPhoto(selectedPatient.patient_id)
                     ? <img src={getPatientPhoto(selectedPatient.patient_id)!} alt="" />
-                    : selectedPatient.full_name.charAt(0).toUpperCase()
-                  }
+                    : selectedPatient.full_name.charAt(0).toUpperCase()}
                 </div>
                 <div>
                   <p className="ds-modal-name">{selectedPatient.full_name}</p>
@@ -1297,6 +1235,24 @@ const DashboardStaff = () => {
             <div className="ds-modal-actions">
               <button className="ddc-btn-secondary" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
               <button className="ddc-btn-danger" onClick={handleDeletePatient}>DELETE</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteRecordConfirm !== null && (
+        <div className="lightbox" onClick={() => setShowDeleteRecordConfirm(null)}>
+          <div className="ds-modal" onClick={e => e.stopPropagation()}>
+            <div className="ds-modal-head ds-modal-head-danger">
+              <span>⚠️</span><h3>Delete Medical Record</h3>
+            </div>
+            <div className="ds-modal-body">
+              <p>Delete Record <strong>#{showDeleteRecordConfirm}</strong>? All associated files will be permanently removed.</p>
+              <p className="ds-modal-warn">This action cannot be undone.</p>
+            </div>
+            <div className="ds-modal-actions">
+              <button className="ddc-btn-secondary" onClick={() => setShowDeleteRecordConfirm(null)}>Cancel</button>
+              <button className="ddc-btn-danger" onClick={() => handleDeleteRecord(showDeleteRecordConfirm!)}>DELETE</button>
             </div>
           </div>
         </div>

@@ -41,11 +41,7 @@ const calcAge = (dob: string) => {
 const urlToBase64WithAuth = async (url: string): Promise<string> => {
   if (!url) return '';
   try {
-    const token =
-      localStorage.getItem('access_token') ||
-      localStorage.getItem('token') ||
-      localStorage.getItem('authToken') ||
-      '';
+    const token = localStorage.getItem('access_token') || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
     const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
     const response = await fetch(url, { headers });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -105,24 +101,7 @@ const FileSizeDeltaRow = ({ label, originalKb, extractedKb }: { label: string; o
   );
 };
 
-const MetricsPanel = ({
-  metrics,
-  title,
-  stegoKb,
-  extractFileSizes,
-}: {
-  metrics: { layer1_mri_stego: QualityLayer; layer2_photo_stego: QualityLayer };
-  title: string;
-  stegoKb?: number;
-  extractFileSizes?: {
-    original_photo_kb: number;
-    original_mri_kb: number;
-    original_txt_kb: number;
-    extracted_photo_kb: number;
-    extracted_mri_kb: number;
-    extracted_txt_kb: number;
-  };
-}) => (
+const MetricsPanel = ({ metrics, title, stegoKb, extractFileSizes }: { metrics: { layer1_mri_stego: QualityLayer; layer2_photo_stego: QualityLayer }; title: string; stegoKb?: number; extractFileSizes?: { original_photo_kb: number; original_mri_kb: number; original_txt_kb: number; extracted_photo_kb: number; extracted_mri_kb: number; extracted_txt_kb: number; }; }) => (
   <div className="pl-metrics">
     <div className="pl-metrics-hd">{title}</div>
     {(['layer1_mri_stego', 'layer2_photo_stego'] as const).map(key => {
@@ -170,75 +149,7 @@ const Lightbox = ({ src, onClose }: { src: string; onClose: () => void }) => (
   </div>
 );
 
-const AnnotPanel = ({ originalData, annotation, onAnnotChange, onDownload, showDownloadBtn = true, isLoading }: {
-  originalData: string; annotation: string; onAnnotChange: (v: string) => void;
-  onDownload: () => void; patientName: string; doctorName: string; showDownloadBtn?: boolean;
-  isLoading?: boolean;
-}) => (
-  <div className="ddc-med-body">
-    <div className="ddc-med-pane">
-      <div className="ddc-med-pane-label">Original Record</div>
-      <div className="ddc-scrollbox">
-        {isLoading ? (
-          <div className="ddc-loading-text">Memuat konten...</div>
-        ) : (
-          <pre className="ddc-pre">{originalData || '(no data available)'}</pre>
-        )}
-      </div>
-    </div>
-    <div className="ddc-med-divider" />
-    <div className="ddc-med-pane">
-      <div className="ddc-med-pane-label">
-        Doctor's Annotation
-        {showDownloadBtn && <button className="btn-download" onClick={onDownload}>⬇ Download</button>}
-      </div>
-      <textarea className="ddc-annot-area" placeholder="Add clinical notes, observations, or annotations here…" value={annotation} onChange={e => onAnnotChange(e.target.value)} />
-    </div>
-  </div>
-);
-
-const ExtractAnnotPanel = ({ originalData, annotation, onAnnotChange, photoUrl, mriUrl, onPhotoClick, onMriClick }: {
-  originalData: string; annotation: string; onAnnotChange: (v: string) => void;
-  photoUrl: string; mriUrl: string; onPhotoClick: () => void; onMriClick: () => void;
-}) => (
-  <div className="ddc-extract-body">
-    <div className="ddc-extract-col ddc-extract-col-images">
-      <div className="ddc-med-pane-label">Medical Image</div>
-      <div className="ddc-extract-images-inner">
-        <div className="ddc-extract-img-block">
-          <div className="ddc-extract-img-sublabel">Patient Photo</div>
-          <div className="ddc-extract-img-frame" onClick={onPhotoClick} title="Click to zoom">
-            <img src={photoUrl} alt="" onError={e => { e.currentTarget.src = noImg; }} />
-            <span className="ddc-av-zoom">🔍</span>
-          </div>
-        </div>
-        <div className="ddc-extract-img-block ddc-extract-img-block-mri">
-          <div className="ddc-extract-img-sublabel">MRI Image</div>
-          <div className="ddc-extract-img-frame ddc-extract-img-frame-mri" onClick={onMriClick} title="Click to zoom">
-            <img src={mriUrl} alt="" onError={e => { e.currentTarget.src = noImg; }} />
-            <span className="ddc-av-zoom">🔍</span>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div className="ddc-med-divider" />
-    <div className="ddc-extract-col ddc-extract-col-text">
-      <div className="ddc-med-pane-label">Original Record</div>
-      <div className="ddc-scrollbox"><pre className="ddc-pre">{originalData || '(no data available)'}</pre></div>
-    </div>
-    <div className="ddc-med-divider" />
-    <div className="ddc-extract-col ddc-extract-col-text">
-      <div className="ddc-med-pane-label">Doctor's Annotation</div>
-      <textarea className="ddc-annot-area" placeholder="Add clinical notes, observations, or annotations here…" value={annotation} onChange={e => onAnnotChange(e.target.value)} />
-    </div>
-  </div>
-);
-
-const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: {
-  steps: PipelineStep[]; pipelineStatus: PipelineStatus;
-  record: MedicalRecordItem | null; extracted: ExtractMedicalResponse | null;
-  plInfo: typeof PIPELINE_INFO[PipelineStatus];
-}) => (
+const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: { steps: PipelineStep[]; pipelineStatus: PipelineStatus; record: MedicalRecordItem | null; extracted: ExtractMedicalResponse | null; plInfo: typeof PIPELINE_INFO[PipelineStatus]; }) => (
   <>
     <div className="ddc-pl-hd">
       <span className="ddc-pl-title">Processing Pipeline</span>
@@ -264,29 +175,10 @@ const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: {
       ))}
     </div>
     {record?.quality_metrics?.embedding && !extracted && (
-      <MetricsPanel
-        metrics={record.quality_metrics.embedding}
-        title="Embedding Quality"
-        stegoKb={record.file_sizes?.stego_kb}
-      />
+      <MetricsPanel metrics={record.quality_metrics.embedding} title="Embedding Quality" stegoKb={record.file_sizes?.stego_kb} />
     )}
     {extracted?.quality_metrics?.extraction && (
-      <MetricsPanel
-        metrics={extracted.quality_metrics.extraction}
-        title="Extraction Quality"
-        extractFileSizes={
-          extracted.file_sizes
-            ? {
-                original_photo_kb:   record?.file_sizes?.original_photo_kb  ?? extracted.file_sizes.original_photo_kb,
-                original_mri_kb:     record?.file_sizes?.original_mri_kb    ?? extracted.file_sizes.original_mri_kb,
-                original_txt_kb:     record?.file_sizes?.original_txt_kb    ?? 0,
-                extracted_photo_kb:  extracted.file_sizes.extracted_photo_kb,
-                extracted_mri_kb:    extracted.file_sizes.extracted_mri_kb,
-                extracted_txt_kb:    extracted.file_sizes.extracted_txt_kb,
-              }
-            : undefined
-        }
-      />
+      <MetricsPanel metrics={extracted.quality_metrics.extraction} title="Extraction Quality" extractFileSizes={extracted.file_sizes ? { original_photo_kb: record?.file_sizes?.original_photo_kb ?? extracted.file_sizes.original_photo_kb, original_mri_kb: record?.file_sizes?.original_mri_kb ?? extracted.file_sizes.original_mri_kb, original_txt_kb: record?.file_sizes?.original_txt_kb ?? 0, extracted_photo_kb: extracted.file_sizes.extracted_photo_kb, extracted_mri_kb: extracted.file_sizes.extracted_mri_kb, extracted_txt_kb: extracted.file_sizes.extracted_txt_kb } : undefined} />
     )}
     <div className={`ddc-pl-info ddc-pl-info-${pipelineStatus}`}>
       <div className="ddc-pl-info-icon">{plInfo.icon}</div>
@@ -307,24 +199,25 @@ const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: {
 const DashboardDoctor = () => {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
-  const [patients,        setPatients]        = useState<PatientResponse[]>([]);
-  const [selected,        setSelected]        = useState<PatientResponse | null>(null);
-  const [record,          setRecord]          = useState<MedicalRecordItem | null>(null);
-  const [patientPhotos,   setPatientPhotos]   = useState<Record<number, string>>({});
-  const [extracted,       setExtracted]       = useState<ExtractMedicalResponse | null>(null);
-  const [extractLoading,  setExtractLoading]  = useState(false);
-  const [pipelineStatus,  setPipelineStatus]  = useState<PipelineStatus>('idle');
-  const [steps,           setSteps]           = useState<PipelineStep[]>(STEPS.map(s => ({ ...s })));
-  const [notif,           setNotif]           = useState({ show: false, msg: '', type: 'success' });
-  const [search,          setSearch]          = useState('');
-  const [tab,             setTab]             = useState<'stego' | 'extract'>('stego');
-  const [lightbox,        setLightbox]        = useState<string | null>(null);
-  const [annotation,      setAnnotation]      = useState('');
-  const [annotExtract,    setAnnotExtract]    = useState('');
-  const [sidebarOpen,     setSidebarOpen]     = useState(false);
-  const [pipelineOpen,    setPipelineOpen]    = useState(false);
-  const [originalContent, setOriginalContent] = useState<string>('');
-  const [loadingContent,  setLoadingContent]  = useState<boolean>(false);
+  const [patients, setPatients] = useState<PatientResponse[]>([]);
+  const [selected, setSelected] = useState<PatientResponse | null>(null);
+  const [medicalRecords, setMedicalRecords] = useState<MedicalRecordItem[]>([]);
+  const [activeRecordIndex, setActiveRecordIndex] = useState(0);
+  const [patientPhotos, setPatientPhotos] = useState<Record<number, string>>({});
+  const [extracted, setExtracted] = useState<ExtractMedicalResponse | null>(null);
+  const [extractLoading, setExtractLoading] = useState(false);
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>('idle');
+  const [steps, setSteps] = useState<PipelineStep[]>(STEPS.map(s => ({ ...s })));
+  const [notif, setNotif] = useState({ show: false, msg: '', type: 'success' });
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<'stego' | 'extract'>('stego');
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [annotation, setAnnotation] = useState('');
+  const [annotExtract, setAnnotExtract] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pipelineOpen, setPipelineOpen] = useState(false);
+  const [originalContents, setOriginalContents] = useState<Record<number, string>>({});
+  const [loadingContent, setLoadingContent] = useState<Record<number, boolean>>({});
 
   const showNotif = useCallback((msg: string, type: string) => setNotif({ show: true, msg, type }), []);
 
@@ -357,40 +250,48 @@ const DashboardDoctor = () => {
     } catch { showNotif('Failed to load patient data', 'error'); }
   }, [showNotif]);
 
-  const loadRecord = useCallback(async (pid: number) => {
+  const loadMedicalRecords = useCallback(async (pid: number) => {
     try {
       const r = await getMedicalRecordsByPatient(pid);
-      const rec = r.records?.length > 0 ? r.records[0] : null;
-      setRecord(rec);
+      const records = r.records ?? [];
+      setMedicalRecords(records);
+      setActiveRecordIndex(0);
+      setExtracted(null);
+      setPipelineStatus('idle');
+      setSteps(STEPS.map(s => ({ ...s, status: 'pending' })));
       setAnnotation('');
       setAnnotExtract('');
-      if (rec?.medical_data_path) {
-        setLoadingContent(true);
-        const content = await fetchTextContent(rec.medical_data_path);
-        setOriginalContent(content);
-        setLoadingContent(false);
-      } else {
-        setOriginalContent('');
+      
+      const contents: Record<number, string> = {};
+      const loading: Record<number, boolean> = {};
+      for (const rec of records) {
+        loading[rec.record_id] = true;
+        if (rec.medical_data_path) {
+          const content = await fetchTextContent(rec.medical_data_path);
+          contents[rec.record_id] = content;
+        } else {
+          contents[rec.record_id] = '';
+        }
+        loading[rec.record_id] = false;
       }
+      setOriginalContents(contents);
+      setLoadingContent(loading);
     } catch {
-      setRecord(null);
-      setOriginalContent('');
+      setMedicalRecords([]);
+      setOriginalContents({});
     }
   }, []);
 
   useEffect(() => { loadPatients(); }, [loadPatients]);
 
   useEffect(() => {
-    setExtracted(null);
-    setTab('stego');
-    setPipelineStatus('idle');
-    setSteps(STEPS.map(s => ({ ...s })));
-    setAnnotation('');
-    setAnnotExtract('');
-    setOriginalContent('');
-    if (selected) loadRecord(selected.patient_id);
-    else setRecord(null);
-  }, [selected, loadRecord]);
+    if (selected) {
+      loadMedicalRecords(selected.patient_id);
+    } else {
+      setMedicalRecords([]);
+      setOriginalContents({});
+    }
+  }, [selected, loadMedicalRecords]);
 
   const runPipeline = async () => {
     const delays = [600, 700, 700, 650];
@@ -404,12 +305,15 @@ const DashboardDoctor = () => {
   };
 
   const handleExtract = async () => {
-    if (!record) return;
+    if (!selected) return;
+    const activeRecord = medicalRecords[activeRecordIndex];
+    if (!activeRecord) return;
+    
     setExtractLoading(true);
     setExtracted(null);
     setTab('extract');
     try {
-      const [data] = await Promise.all([extractMedicalData(record.record_id), runPipeline()]);
+      const [data] = await Promise.all([extractMedicalData(activeRecord.record_id), runPipeline()]);
       setExtracted(data);
       setPipelineStatus('done');
       showNotif('Medical data successfully decrypted', 'success');
@@ -449,7 +353,7 @@ const DashboardDoctor = () => {
     return el;
   };
 
-  const esc   = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const nl2br = (s: string) => esc(s).replace(/\n/g, '<br/>');
 
   const headerHtml = (title: string, patientName: string, patientAge: string) => `
@@ -489,21 +393,10 @@ const DashboardDoctor = () => {
     await generatePDF(buildReportElement(html), `Medical_Annotation_Report_${todayFilename()}.pdf`);
   };
 
-  const handleDownloadExtract = async (
-    originalData: string, annotationText: string, patientName: string, patientAge: string,
-    photoUrl: string, mriUrl: string,
-  ) => {
+  const handleDownloadExtract = async (originalData: string, annotationText: string, patientName: string, patientAge: string, photoUrl: string, mriUrl: string) => {
     const doctorName = user.full_name || 'Doctor';
-
-    const [photoB64, mriB64] = await Promise.all([
-      urlToBase64WithAuth(photoUrl),
-      urlToBase64WithAuth(mriUrl),
-    ]);
-
-    const imgTag = (b64: string) => b64
-      ? `<img src="${b64}" style="width:100%;height:100%;object-fit:contain;display:block;"/>`
-      : `<div style="width:100%;height:100%;background:#eee;display:flex;align-items:center;justify-content:center;font-size:11px;color:#999;">No Image</div>`;
-
+    const [photoB64, mriB64] = await Promise.all([urlToBase64WithAuth(photoUrl), urlToBase64WithAuth(mriUrl)]);
+    const imgTag = (b64: string) => b64 ? `<img src="${b64}" style="width:100%;height:100%;object-fit:contain;display:block;"/>` : `<div style="width:100%;height:100%;background:#eee;display:flex;align-items:center;justify-content:center;font-size:11px;color:#999;">No Image</div>`;
     const html = `
       ${headerHtml('Medical Extraction Report', patientName, patientAge)}
       <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
@@ -532,19 +425,32 @@ const DashboardDoctor = () => {
     await generatePDF(buildReportElement(html, 1100), `Medical_Extraction_Report_${todayFilename()}.pdf`);
   };
 
-  const filtered = patients.filter(p =>
-    p.full_name.toLowerCase().includes(search.toLowerCase()) ||
-    p.medical_record_no.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = patients.filter(p => p.full_name.toLowerCase().includes(search.toLowerCase()) || p.medical_record_no.toLowerCase().includes(search.toLowerCase()));
   const getPhoto = (id: number) => patientPhotos[id] || null;
-  const plInfo   = PIPELINE_INFO[pipelineStatus];
+  const plInfo = PIPELINE_INFO[pipelineStatus];
+  const activeRecord = medicalRecords[activeRecordIndex] ?? null;
+  const activeOriginalContent = activeRecord ? originalContents[activeRecord.record_id] || '' : '';
+  const activeLoadingContent = activeRecord ? loadingContent[activeRecord.record_id] || false : false;
+
+  const showExtractButton = activeRecord && pipelineStatus !== 'done';
 
   const handleSelectPatient = (p: PatientResponse) => {
     setSelected(prev => prev?.patient_id === p.patient_id ? null : p);
     setSidebarOpen(false);
+    setExtracted(null);
+    setPipelineStatus('idle');
+    setTab('stego');
   };
 
-  const showExtractButton = record && pipelineStatus !== 'done';
+  const handleRecordClick = (index: number) => {
+    setActiveRecordIndex(index);
+    setExtracted(null);
+    setPipelineStatus('idle');
+    setSteps(STEPS.map(s => ({ ...s, status: 'pending' })));
+    setAnnotation('');
+    setAnnotExtract('');
+    setTab('stego');
+  };
 
   return (
     <div className="ddc">
@@ -565,7 +471,7 @@ const DashboardDoctor = () => {
         <div className="ddc-pipeline-sheet-handle" />
         <button className="ddc-pipeline-sheet-close" onClick={() => setPipelineOpen(false)}>✕</button>
         <div className="ddc-pipeline-sheet-inner">
-          <PipelineContent steps={steps} pipelineStatus={pipelineStatus} record={record} extracted={extracted} plInfo={plInfo} />
+          <PipelineContent steps={steps} pipelineStatus={pipelineStatus} record={activeRecord} extracted={extracted} plInfo={plInfo} />
         </div>
       </div>
 
@@ -586,7 +492,7 @@ const DashboardDoctor = () => {
             {filtered.length === 0 ? (
               <div className="ddc-sb-empty"><span>🔍</span><p>No patients found</p></div>
             ) : filtered.map(p => {
-              const photo  = getPhoto(p.patient_id);
+              const photo = getPhoto(p.patient_id);
               const active = selected?.patient_id === p.patient_id;
               return (
                 <button key={p.patient_id} className={`ddc-sb-item ${active ? 'active' : ''}`} onClick={() => handleSelectPatient(p)}>
@@ -636,11 +542,7 @@ const DashboardDoctor = () => {
           ) : (
             <div className="ddc-detail">
               <div className="ddc-pbar">
-                <div
-                  className={`ddc-av ddc-av-lg ddc-av-${selected.gender} ddc-av-clickable`}
-                  onClick={() => { const ph = getPhoto(selected.patient_id); if (ph) setLightbox(ph); }}
-                  title="Click to zoom"
-                >
+                <div className={`ddc-av ddc-av-lg ddc-av-${selected.gender} ddc-av-clickable`} onClick={() => { const ph = getPhoto(selected.patient_id); if (ph) setLightbox(ph); }} title="Click to zoom">
                   {getPhoto(selected.patient_id) ? <img src={getPhoto(selected.patient_id)!} alt="" /> : selected.full_name.charAt(0).toUpperCase()}
                   <span className="ddc-av-zoom">🔍</span>
                 </div>
@@ -653,15 +555,17 @@ const DashboardDoctor = () => {
                     <span className="sep">·</span>
                     <span>{calcAge(selected.date_of_birth)}</span>
                     <span className="sep">·</span>
-                    <span>Date of Birth: {formatDate(selected.date_of_birth)}</span>
+                    <span>DOB: {formatDate(selected.date_of_birth)}</span>
+                    {medicalRecords.length > 0 && (
+                      <>
+                        <span className="sep">·</span>
+                        <span className="ddc-records-count">{medicalRecords.length} record{medicalRecords.length > 1 ? 's' : ''}</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 {showExtractButton && (
-                  <button
-                    className={`ddc-btn-ext ${extractLoading ? 'loading' : ''}`}
-                    onClick={handleExtract}
-                    disabled={extractLoading}
-                  >
+                  <button className={`ddc-btn-ext ${extractLoading ? 'loading' : ''}`} onClick={handleExtract} disabled={extractLoading}>
                     {extractLoading ? <><span className="spin" />Extracting…</> : <>🔓 Extract Data</>}
                   </button>
                 )}
@@ -669,10 +573,21 @@ const DashboardDoctor = () => {
 
               <div className="ddc-workspace">
                 <div className="ddc-content-panel">
-                  {!record ? (
-                    <div className="ddc-empty"><span>📁</span><p>No medical record found for this patient.</p></div>
+                  {medicalRecords.length === 0 ? (
+                    <div className="ddc-empty"><span>📁</span><p>No medical records found for this patient.</p></div>
                   ) : (
                     <>
+                      <div className="ddc-records-tabs">
+                        <div className="ddc-records-tab-list">
+                          {medicalRecords.map((rec, idx) => (
+                            <button key={rec.record_id} className={`ddc-records-tab ${idx === activeRecordIndex ? 'active' : ''}`} onClick={() => handleRecordClick(idx)}>
+                              <span className="ddc-records-tab-num">#{rec.record_id}</span>
+                              <span className="ddc-records-tab-date">{formatDate(rec.upload_date ?? '')}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
                       <div className="ddc-tabs">
                         <button className={`ddc-tab ${tab === 'stego' ? 'act' : ''}`} onClick={() => setTab('stego')}>🔒 Stego Preview</button>
                         <button className={`ddc-tab ${tab === 'extract' ? 'act' : ''}`} onClick={() => setTab('extract')} disabled={!extracted && pipelineStatus !== 'running'}>
@@ -680,7 +595,7 @@ const DashboardDoctor = () => {
                           {extracted && <span className="ddc-tab-pip" />}
                         </button>
                         <span className="ddc-tabs-fill" />
-                        <span className="ddc-rec-badge">Record #{record.record_id} · {formatDate(record.upload_date ?? '')}</span>
+                        <span className="ddc-rec-badge">Record #{activeRecord?.record_id} · {formatDate(activeRecord?.upload_date ?? '')}</span>
                       </div>
 
                       {tab === 'stego' && (
@@ -688,20 +603,27 @@ const DashboardDoctor = () => {
                           <div className="ddc-card ddc-med-card">
                             <div className="card-hd">
                               <span className="card-title">Medical Data Preview</span>
-                              <button className="btn-download" onClick={() => handleDownloadStego(originalContent, annotation, selected.full_name, calcAge(selected.date_of_birth))}>
+                              <button className="btn-download" onClick={() => handleDownloadStego(activeOriginalContent, annotation, selected.full_name, calcAge(selected.date_of_birth))}>
                                 ⬇ Download
                               </button>
                             </div>
-                            <AnnotPanel
-                              originalData={originalContent}
-                              annotation={annotation}
-                              onAnnotChange={setAnnotation}
-                              onDownload={() => {}}
-                              patientName={selected.full_name}
-                              doctorName={user.full_name || 'Doctor'}
-                              showDownloadBtn={false}
-                              isLoading={loadingContent}
-                            />
+                            <div className="ddc-med-body">
+                              <div className="ddc-med-pane">
+                                <div className="ddc-med-pane-label">Original Record</div>
+                                <div className="ddc-scrollbox">
+                                  {activeLoadingContent ? (
+                                    <div className="ddc-loading-text">Memuat konten...</div>
+                                  ) : (
+                                    <pre className="ddc-pre">{activeOriginalContent || '(no data available)'}</pre>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="ddc-med-divider" />
+                              <div className="ddc-med-pane">
+                                <div className="ddc-med-pane-label">Doctor's Annotation</div>
+                                <textarea className="ddc-annot-area" placeholder="Add clinical notes, observations, or annotations here…" value={annotation} onChange={e => setAnnotation(e.target.value)} />
+                              </div>
+                            </div>
                             <div className="card-ft">
                               <span>🔐</span>
                               <span>Press <strong>Extract Data</strong> to decrypt the patient scan, MRI, and full medical record from the stego image.</span>
@@ -721,21 +643,39 @@ const DashboardDoctor = () => {
                             <div className="ddc-card ddc-extract-card">
                               <div className="card-hd">
                                 <span className="card-title">Diagnosis, Clinical Notes &amp; Medical Image</span>
-                                <button className="btn-download" onClick={() => handleDownloadExtract(
-                                  extracted.medical_data, annotExtract, extracted.patient_name, calcAge(selected.date_of_birth),
-                                  toUrl(extracted.photo_path),
-                                  toUrl(extracted.mri_path),
-                                )}>⬇ Download</button>
+                                <button className="btn-download" onClick={() => handleDownloadExtract(extracted.medical_data, annotExtract, extracted.patient_name, calcAge(selected.date_of_birth), toUrl(extracted.photo_path), toUrl(extracted.mri_path))}>⬇ Download</button>
                               </div>
-                              <ExtractAnnotPanel
-                                originalData={extracted.medical_data}
-                                annotation={annotExtract}
-                                onAnnotChange={setAnnotExtract}
-                                photoUrl={toUrl(extracted.photo_path)}
-                                mriUrl={toUrl(extracted.mri_path)}
-                                onPhotoClick={() => setLightbox(toUrl(extracted.photo_path))}
-                                onMriClick={() => setLightbox(toUrl(extracted.mri_path))}
-                              />
+                              <div className="ddc-extract-body">
+                                <div className="ddc-extract-col ddc-extract-col-images">
+                                  <div className="ddc-med-pane-label">Medical Image</div>
+                                  <div className="ddc-extract-images-inner">
+                                    <div className="ddc-extract-img-block">
+                                      <div className="ddc-extract-img-sublabel">Patient Photo</div>
+                                      <div className="ddc-extract-img-frame" onClick={() => setLightbox(toUrl(extracted.photo_path))} title="Click to zoom">
+                                        <img src={toUrl(extracted.photo_path)} alt="" onError={e => { e.currentTarget.src = noImg; }} />
+                                        <span className="ddc-av-zoom">🔍</span>
+                                      </div>
+                                    </div>
+                                    <div className="ddc-extract-img-block ddc-extract-img-block-mri">
+                                      <div className="ddc-extract-img-sublabel">MRI Image</div>
+                                      <div className="ddc-extract-img-frame ddc-extract-img-frame-mri" onClick={() => setLightbox(toUrl(extracted.mri_path))} title="Click to zoom">
+                                        <img src={toUrl(extracted.mri_path)} alt="" onError={e => { e.currentTarget.src = noImg; }} />
+                                        <span className="ddc-av-zoom">🔍</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="ddc-med-divider" />
+                                <div className="ddc-extract-col ddc-extract-col-text">
+                                  <div className="ddc-med-pane-label">Original Record</div>
+                                  <div className="ddc-scrollbox"><pre className="ddc-pre">{extracted.medical_data || '(no data available)'}</pre></div>
+                                </div>
+                                <div className="ddc-med-divider" />
+                                <div className="ddc-extract-col ddc-extract-col-text">
+                                  <div className="ddc-med-pane-label">Doctor's Annotation</div>
+                                  <textarea className="ddc-annot-area" placeholder="Add clinical notes, observations, or annotations here…" value={annotExtract} onChange={e => setAnnotExtract(e.target.value)} />
+                                </div>
+                              </div>
                               {extracted.extract_time_seconds !== undefined && (
                                 <div className="card-ft">
                                   <span>⚡</span>
@@ -753,7 +693,7 @@ const DashboardDoctor = () => {
                 </div>
 
                 <div className="ddc-pipeline">
-                  <PipelineContent steps={steps} pipelineStatus={pipelineStatus} record={record} extracted={extracted} plInfo={plInfo} />
+                  <PipelineContent steps={steps} pipelineStatus={pipelineStatus} record={activeRecord} extracted={extracted} plInfo={plInfo} />
                 </div>
               </div>
             </div>
