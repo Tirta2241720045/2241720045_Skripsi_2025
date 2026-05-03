@@ -13,16 +13,20 @@ const Navbar: React.FC<NavbarProps> = ({ userFullName = '', userRole = '' }) => 
   const [currentDateTime, setCurrentDateTime] = useState({ date: '', time: '' });
 
   const handleLogout = () => {
-    logout(); 
+    logout();
     navigate('/');
+  };
+
+  const handleBrandClick = () => {
+    window.location.reload();
   };
 
   const getRoleLabel = (role: string) => {
     switch (role) {
-      case 'admin':   return 'Administrator';
-      case 'doctor':  return 'Doctor';
-      case 'staff':   return 'Medical Staff';
-      default:        return 'User';
+      case 'admin':  return 'Administrator';
+      case 'doctor': return 'Doctor';
+      case 'staff':  return 'Medical Staff';
+      default:       return 'User';
     }
   };
 
@@ -55,7 +59,11 @@ const Navbar: React.FC<NavbarProps> = ({ userFullName = '', userRole = '' }) => 
   return (
     <nav className="stegoshield-navbar">
       <div className="stegoshield-navbar-left">
-        <div className="stegoshield-navbar-brand">
+        <div
+          className="stegoshield-navbar-brand"
+          onClick={handleBrandClick}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="stegoshield-navbar-brand-icon">
             <img
               src="http://localhost:8000/static/logo.png"
@@ -100,37 +108,53 @@ const Navbar: React.FC<NavbarProps> = ({ userFullName = '', userRole = '' }) => 
 
         <div className="stegoshield-navbar-divider" />
 
-        <div className="stegoshield-navbar-admin-info">
-          <div className="stegoshield-navbar-admin-avatar-wrapper">
-            <img
-              src={getRoleIcon(userRole)}
-              alt={getRoleLabel(userRole)}
-              className="stegoshield-navbar-admin-avatar-img"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                const parent = e.currentTarget.parentElement;
-                if (parent) {
-                  parent.textContent = userFullName?.charAt(0).toUpperCase() || 'U';
-                  parent.style.background = 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)';
-                  parent.style.display = 'flex';
-                  parent.style.alignItems = 'center';
-                  parent.style.justifyContent = 'center';
-                  parent.style.color = 'white';
-                  parent.style.fontWeight = '700';
-                  parent.style.fontSize = '18px';
-                }
-              }}
-            />
+        <div className="stegoshield-navbar-admin-wrapper">
+          <div className="stegoshield-navbar-admin-info">
+            <div className="stegoshield-navbar-admin-avatar-wrapper">
+              <img
+                src={getRoleIcon(userRole)}
+                alt={getRoleLabel(userRole)}
+                className="stegoshield-navbar-admin-avatar-img"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  const parent = e.currentTarget.parentElement;
+                  if (parent) {
+                    parent.textContent = userFullName?.charAt(0).toUpperCase() || 'U';
+                    parent.style.background = 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)';
+                    parent.style.display = 'flex';
+                    parent.style.alignItems = 'center';
+                    parent.style.justifyContent = 'center';
+                    parent.style.color = 'white';
+                    parent.style.fontWeight = '700';
+                    parent.style.fontSize = '18px';
+                  }
+                }}
+              />
+            </div>
+            <div className="stegoshield-navbar-admin-details">
+              <p className="stegoshield-navbar-admin-name">{userFullName}</p>
+              <p className="stegoshield-navbar-admin-role">{getRoleLabel(userRole)}</p>
+            </div>
           </div>
-          <div className="stegoshield-navbar-admin-details">
-            <p className="stegoshield-navbar-admin-name">{userFullName}</p>
-            <p className="stegoshield-navbar-admin-role">{getRoleLabel(userRole)}</p>
-          </div>
+          <button
+            onClick={handleLogout}
+            className="stegoshield-navbar-btn-power"
+            title="Logout"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+              <line x1="12" y1="2" x2="12" y2="12" />
+            </svg>
+          </button>
         </div>
-
-        <button onClick={handleLogout} className="stegoshield-navbar-btn-logout">
-          Logout
-        </button>
       </div>
     </nav>
   );
