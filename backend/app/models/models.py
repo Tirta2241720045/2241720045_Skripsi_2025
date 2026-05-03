@@ -41,6 +41,29 @@ class MedicalRecordResponse(MedicalRecordBase):
     record_id: int
     created_at: datetime
 
+class ImageQualityMetricBase(BaseModel):
+    record_id: int
+    layer1_mse: Optional[float] = None
+    layer1_psnr: Optional[float] = None
+    layer1_ssim: Optional[float] = None
+    layer1_brisque: Optional[float] = None
+    layer1_niqe: Optional[float] = None
+    layer1_piqe: Optional[float] = None
+    layer2_mse: Optional[float] = None
+    layer2_psnr: Optional[float] = None
+    layer2_ssim: Optional[float] = None
+    layer2_brisque: Optional[float] = None
+    layer2_niqe: Optional[float] = None
+    layer2_piqe: Optional[float] = None
+
+class ImageQualityMetricCreate(ImageQualityMetricBase):
+    pass
+
+class ImageQualityMetricResponse(ImageQualityMetricBase):
+    model_config = ConfigDict(from_attributes=True)
+    metric_id: int
+    created_at: datetime
+
 class UserBase(BaseModel):
     username: str
     full_name: str

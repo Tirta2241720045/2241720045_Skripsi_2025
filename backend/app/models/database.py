@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, D
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:polinema@localhost/stegoshield_db")
@@ -40,12 +40,18 @@ class ImageQualityMetric(Base):
     __tablename__ = "image_quality_metrics"
     metric_id = Column(Integer, primary_key=True, index=True)
     record_id = Column(Integer, ForeignKey('medical_records.record_id'))
-    layer1_mse  = Column(Float, nullable=True)
+    layer1_mse = Column(Float, nullable=True)
     layer1_psnr = Column(Float, nullable=True)
     layer1_ssim = Column(Float, nullable=True)
-    layer2_mse  = Column(Float, nullable=True)
+    layer1_brisque = Column(Float, nullable=True)
+    layer1_niqe = Column(Float, nullable=True)
+    layer1_piqe = Column(Float, nullable=True)
+    layer2_mse = Column(Float, nullable=True)
     layer2_psnr = Column(Float, nullable=True)
     layer2_ssim = Column(Float, nullable=True)
+    layer2_brisque = Column(Float, nullable=True)
+    layer2_niqe = Column(Float, nullable=True)
+    layer2_piqe = Column(Float, nullable=True)
     created_at = Column(DateTime, default=get_indonesia_time)
     medical_record = relationship("MedicalRecord", back_populates="quality_metrics")
 
