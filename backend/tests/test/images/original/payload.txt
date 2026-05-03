@@ -1,0 +1,195 @@
+================================================================================
+                    RINGKASAN MEDIS PASIEN - RAWAT INAP
+================================================================================
+
+------------------------------ DATA DEMOGRAFI ------------------------------
+Admission Date    : 2025-03-14 14:30 WIB
+Discharge Date    : 2025-03-16 10:00 WIB
+Date of Birth     : 1998-07-22
+Sex               : M
+Blood Type        : O+
+Address           : Jl. Melati No. 45, Cempaka Putih, Jakarta Pusat 10520
+Phone             : +62-812-3456-7890
+Emergency Contact : Ibu Ratna Dewi - +62-813-9876-5432
+Insurance         : BPJS Kesehatan No. 0001234567890
+Hospital          : RSUPN Dr. Cipto Mangunkusumo (RSCM)
+
+------------------------------ DATA PASIEN ---------------------------------
+Patient Name      : Andi Pratama
+Medical Record No : MRN-20250314-001
+NIK               : 3174012207980001
+Height/Weight     : 172 cm / 68 kg (BMI 23.0)
+Allergies         : Sulfa (rash), Latex (dermatitis)
+
+------------------------------ RIWAYAT PENYAKIT ----------------------------
+Past Medical History:
+  - Tension-type Headache (since 2022, 2-3x/week, trigger: stress)
+  - Allergic Rhinitis (since 2021, controlled with Cetirizine)
+  - Dengue Fever (2019, hospitalized 5 days)
+  - Appendectomy (2015, uncomplicated)
+
+Family History:
+  - Father (58): Hypertension, Diabetes Type 2
+  - Mother (55): Migraine without aura
+  - Brother (24): Healthy
+
+------------------------------ KELUHAN UTAMA -------------------------------
+Chief Complaint:
+  Nyeri kepala hebat 3 hari, tidak responsif terhadap Paracetamol.
+  Nyeri bilateral frontal-temporal, seperti diikat kencang (band-like).
+  Intensitas 7/10, meningkat saat bekerja di depan komputer.
+
+Triggering Factors:
+  - Deadline project: kerja 12-14 jam/hari selama 2 minggu
+  - Tidur hanya 3-4 jam/malam
+  - Konsumsi kopi 4-5 cangkir/hari
+  - Stres akumulatif
+
+Negative Symptoms (tidak ada):
+  - Tidak ada mual/muntah signifikan
+  - Tidak ada fotofobia/fonofobia
+  - Tidak ada aura, tidak ada gangguan visual
+  - Tidak ada kejang, tidak ada penurunan kesadaran
+  - Tidak ada defisit neurologis fokal
+
+------------------------------ PEMERIKSAAN FISIK ---------------------------
+Vital Signs (Admission):
+  Temp: 36.7°C | HR: 88 bpm | RR: 18/min | BP: 128/84 | SpO2: 98%
+
+General: Compos mentis, GCS 15 (E4 V5 M6), tampak lelah
+
+Neurological Examination:
+  - Cranial Nerves II-XII: Intact, no deficit
+  - Fundoscopy: Normal, no papilledema, sharp disc margins
+  - Motor: Strength 5/5 all limbs, normal tone
+  - Sensory: Intact all modalities
+  - Reflexes: 2+ all limbs, plantar flexor bilateral
+  - Cerebellar: Finger-to-nose normal, Romberg negative, gait normal
+  - Meningeal signs: Kernig (-), Brudzinski (-)
+
+Head & Neck:
+  - Trapezius tenderness (+) bilateral
+  - Paraspinal muscle spasm (+) cervical
+
+Other Systems: Cardiovascular, Respiratory, Abdomen - unremarkable
+
+------------------------------ HASIL PEMERIKSAAN ---------------------------
+Laboratory (2025-03-14):
+  Hb 14.8 | WBC 7,200 | PLT 258,000
+  BUN 14 | Creatinine 0.9 | eGFR >90
+  Na 140 | K 4.1 | Glucose 92
+  ALT 22 | AST 18 | CRP 1.2
+  Urinalysis: Normal
+
+CT Head Non-Contrast (2025-03-14):
+  No hemorrhage. No mass effect. Ventricles normal.
+  No skull fracture. IMPRESSION: Normal CT Head.
+
+MRI Brain With/Without Contrast (2025-03-15):
+  No intracranial mass, hemorrhage, or infarct.
+  Normal signal white and gray matter.
+  Normal ventricles, sulci, cisterns.
+  Normal flow voids major vessels.
+  No abnormal meningeal enhancement.
+  IMPRESSION: NORMAL BRAIN MRI
+  (No intracranial abnormality detected)
+
+------------------------------ DIAGNOSIS -----------------------------------
+Primary:
+  Tension-type Headache, Frequent Episodic (ICD-10: G44.21)
+
+Secondary:
+  Cervical Myofascial Pain Syndrome (ICD-10: M79.1)
+  Occupational Stress-related Insomnia (ICD-10: Z73.3)
+
+Differentials Ruled Out:
+  - Migraine (no typical features: no photophobia, no pulsating quality)
+  - Cervicogenic headache (tension-type features dominant)
+  - Intracranial mass/lesion (normal CT + MRI)
+  - Medication Overuse Headache (no withdrawal pattern)
+  - Idiopathic Intracranial Hypertension (no papilledema, normal MRI)
+
+------------------------------ TATALAKSANA ---------------------------------
+Acute Treatment:
+  1. IV Paracetamol 1000 mg single dose → pain 7/10 to 3/10
+  2. PO Paracetamol 500 mg PRN (2x during stay)
+  3. Diazepam 2 mg PO at bedtime (2025-03-14, for sleep/muscle relaxation)
+  4. NaCl 0.9% 500 mL IV (mild dehydration)
+
+Non-pharmacological:
+  - Cold compress neck & forehead PRN
+  - Relaxation technique education (physiotherapist)
+  - Ergonomic counseling for workstation
+  - Sleep hygiene education (nurse educator)
+
+Response: Significant improvement. Pain 1/10 at discharge.
+
+------------------------------ INSTRUKSI PULANG ----------------------------
+1. FOLLOW-UP:
+   Neurology Clinic, 2025-03-23, 10:00 WIB
+   Dr. Andi Wijaya, Sp.N(K) - Poliklinik Neurologi Lt. 2 RSCM
+
+2. MEDICATIONS:
+   a. Paracetamol 500 mg - 1 tablet if headache, max 3x/day
+   b. Amitriptyline 10 mg - 1 tablet at bedtime (prophylactic)
+      Side effects: dry mouth, drowsiness (temporary)
+      DO NOT drive after taking
+   c. Diazepam 2 mg - if severe muscle tension, max 1 at bedtime, max 3x/week
+      DO NOT use with alcohol
+   d. Continue Cetirizine 10 mg PRN for allergy
+
+3. LIFESTYLE:
+   a. Sleep: 7-8 jam/hari, tidur 22:00-23:00
+      No screen 1 jam sebelum tidur, no kafein setelah jam 14:00
+   b. Work: Aturan 20-20-20 (setiap 20 menit, lihat objek 20 kaki, 20 detik)
+      Monitor sejajar mata, kursi dengan penyangga leher
+      Istirahat 5 menit setiap 1 jam kerja
+   c. Exercise: Peregangan leher & bahu 3x/hari
+      Jalan kaki/renang ringan 30 menit, 3-4x/minggu
+   d. Stress: Meditasi/mindfulness, bicarakan beban kerja dengan atasan
+      Catat pemicu sakit kepala (headache diary)
+   e. Hidrasi: 8-10 gelas air/hari, kafein maks 1-2 cangkir sebelum jam 14:00
+   f. Nutrisi: Makan teratur, tidak melewatkan waktu makan
+
+4. WARNING SIGNS - Kembali ke IGD SEGERA jika:
+   - Sakit kepala "thunderclap" (terhebat seumur hidup)
+   - Demam >38.5°C + kaku kuduk
+   - Muntah terus-menerus (>3x dalam 1 jam)
+   - Gangguan penglihatan mendadak (kabur/ganda/hilang)
+   - Lemah/mati rasa satu sisi tubuh
+   - Sulit bicara atau memahami pembicaraan
+   - Penurunan kesadaran/pingsan
+   - Kejang/konvulsi
+   - Bingung atau perubahan status mental
+   - Tidak bisa berjalan/vertigo berat
+   - Nyeri kepala bertambah parah meski sudah minum obat
+
+5. SURAT SAKIT:
+   Istirahat: 2025-03-17 s/d 2025-03-21 (5 hari kerja)
+   Kembali kerja: 2025-03-24 (half-day direkomendasikan minggu pertama)
+   Tidak lembur 2 minggu, maks 8 jam/hari
+
+6. CATATAN TAMBAHAN:
+   - Pasien paham dan mampu menjelaskan kembali semua instruksi
+   - Keluarga (ibu) hadir saat edukasi pemulangan
+   - CD MRI, resep, dan surat kontrol diberikan
+   - Prognosis: Baik dengan modifikasi gaya hidup dan kepatuhan obat
+
+------------------------------ RESUME AKHIR --------------------------------
+Pasien Andi Pratama (MRN-20250314-001, 26 tahun, laki-laki) dirawat
+2025-03-14 s/d 2025-03-16 dengan diagnosis Tension-type Headache.
+Pemeriksaan CT dan MRI otak dalam batas normal. Tidak ditemukan
+kelainan intrakranial. Pasien menunjukkan perbaikan signifikan dengan
+terapi analgesia, relaksan otot, dan perbaikan kualitas tidur.
+Dipulangkan dalam kondisi stabil dengan terapi profilaksis Amitriptyline
+dan instruksi modifikasi gaya hidup komprehensif. Kontrol Neurologi
+7 hari pasca-pulang. Pasien dan keluarga diedukasi mengenai tanda
+bahaya yang memerlukan kunjungan segera ke IGD.
+
+Discharge Doctor:
+dr. Andi Wijaya, Sp.N(K) - SIP: 12345/SIP-DKI/2020
+Tanggal: 2025-03-16, 10:00 WIB
+
+================================================================================
+                END OF DISCHARGE SUMMARY - MRN-20250314-001
+================================================================================
