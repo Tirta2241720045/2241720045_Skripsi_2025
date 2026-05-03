@@ -5,11 +5,11 @@ import '../styles/Login.css';
 
 const Login = () => {
   const navigate = useNavigate();
-  const [username, setUsername]       = useState('');
-  const [password, setPassword]       = useState('');
-  const [error, setError]             = useState('');
+  const [username, setUsername]         = useState('');
+  const [password, setPassword]         = useState('');
+  const [error, setError]               = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading]     = useState(false);
+  const [isLoading, setIsLoading]       = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +30,10 @@ const Login = () => {
     }
   };
 
+  const handleBrandClick = () => {
+    window.location.reload();
+  };
+
   return (
     <div className="stegoshield-login-wrapper">
       <div className="stegoshield-login-floating-shape stegoshield-login-shape-1" />
@@ -42,7 +46,11 @@ const Login = () => {
       <div className="stegoshield-login-medical-icon stegoshield-login-icon-3">❤</div>
 
       <div className="stegoshield-login-container">
-        <div className="stegoshield-login-logo-container">
+        <div
+          className="stegoshield-login-logo-container"
+          onClick={handleBrandClick}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="stegoshield-login-logo-wrapper">
             <img
               src="http://localhost:8000/static/logo.png"
