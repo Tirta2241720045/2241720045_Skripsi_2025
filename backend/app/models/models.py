@@ -55,6 +55,11 @@ class ImageQualityMetricBase(BaseModel):
     layer2_brisque: Optional[float] = None
     layer2_niqe: Optional[float] = None
     layer2_piqe: Optional[float] = None
+    # --- AccTxt fields ---
+    acc_txt: Optional[float] = None
+    acc_txt_D: Optional[int] = None
+    acc_txt_T: Optional[int] = None
+    acc_txt_errors: Optional[int] = None
 
 class ImageQualityMetricCreate(ImageQualityMetricBase):
     pass

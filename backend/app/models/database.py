@@ -52,6 +52,11 @@ class ImageQualityMetric(Base):
     layer2_brisque = Column(Float, nullable=True)
     layer2_niqe = Column(Float, nullable=True)
     layer2_piqe = Column(Float, nullable=True)
+    # --- AccTxt columns ---
+    acc_txt = Column(Float, nullable=True)          # persentase akurasi, misal 100.0
+    acc_txt_D = Column(Integer, nullable=True)       # jumlah bit yang benar terdekode
+    acc_txt_T = Column(Integer, nullable=True)       # total bit pesan asli
+    acc_txt_errors = Column(Integer, nullable=True)  # jumlah bit yang salah
     created_at = Column(DateTime, default=get_indonesia_time)
     medical_record = relationship("MedicalRecord", back_populates="quality_metrics")
 
