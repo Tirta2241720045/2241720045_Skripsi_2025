@@ -4,11 +4,22 @@ export interface QualityMetrics {
   mse: number;
   psnr: number;
   ssim: number;
+  brisque: number;
+  niqe: number;
+  piqe: number;
+}
+
+export interface AccTxtResult {
+  acc_txt: number | null;
+  D: number | null;
+  T: number | null;
+  bit_errors: number | null;
 }
 
 export interface LayerMetrics {
   layer1_mri_stego: QualityMetrics;
   layer2_photo_stego: QualityMetrics;
+  acc_txt?: AccTxtResult | null;
 }
 
 export interface MedicalQualityMetrics {
@@ -16,11 +27,16 @@ export interface MedicalQualityMetrics {
   extraction?: LayerMetrics | null;
 }
 
-export interface CapacityInfo {
-  data_size_bytes: number;
-  mri_capacity_bytes: number;
-  mri_stego_size_bytes: number;
-  photo_capacity_bytes: number;
+export interface VisualizationPaths {
+  mri_lsb_map: string | null;
+  photo_lsb_map: string | null;
+}
+
+export interface EmbedTime {
+  layer1_seconds: number;
+  layer2_seconds: number;
+  visualization_seconds: number;
+  total_seconds: number;
 }
 
 export interface UploadFileSizes {
@@ -28,13 +44,12 @@ export interface UploadFileSizes {
   original_mri_kb: number;
   original_photo_kb: number;
   stego_kb: number;
+  vis_mri_kb: number;
+  vis_photo_kb: number;
 }
 
 export interface ExtractFileSizes {
-  original_mri_kb: number;
-  original_photo_kb: number;
   stego_kb: number;
-  original_txt_kb: number;
   extracted_mri_kb: number;
   extracted_photo_kb: number;
   extracted_txt_kb: number;
@@ -45,22 +60,18 @@ export interface RecordFileSizes {
   original_mri_kb: number;
   original_photo_kb: number;
   stego_kb: number;
+  vis_mri_kb: number;
+  vis_photo_kb: number;
 }
 
 export interface UploadMedicalResponse {
   message: string;
   record_id: number;
   stego_image: string;
-  embed_time: {
-    layer1_seconds: number;
-    layer2_seconds: number;
-    total_seconds: number;
-  };
-  quality_metrics: {
-    layer1_mri_stego: QualityMetrics;
-    layer2_photo_stego: QualityMetrics;
-  };
-  capacity_info?: CapacityInfo;
+  roni_type: string;
+  visualization: VisualizationPaths;
+  embed_time: EmbedTime;
+  quality_metrics: LayerMetrics;
   file_sizes: UploadFileSizes;
 }
 
@@ -75,12 +86,11 @@ export interface ExtractMedicalResponse {
   mri_path: string;
   txt_path: string;
   lsb_extraction_success: boolean;
+  roni_type: string;
+  acc_txt: AccTxtResult;
   quality_metrics: {
-    extraction: {
-      layer1_mri_stego: QualityMetrics;
-      layer2_photo_stego: QualityMetrics;
-    };
-  } | null;
+    extraction: LayerMetrics;
+  };
   file_sizes: ExtractFileSizes;
 }
 
@@ -90,8 +100,10 @@ export interface MedicalRecordItem {
   photo_path: string;
   mri_path: string;
   stego_photo_path: string;
+  roni_type: string;
+  visualization: VisualizationPaths;
   upload_date: string | null;
-  quality_metrics: MedicalQualityMetrics | null;
+  quality_metrics: MedicalQualityMetrics;
   file_sizes: RecordFileSizes;
 }
 
