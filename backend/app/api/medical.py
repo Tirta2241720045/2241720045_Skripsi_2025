@@ -124,29 +124,20 @@ def _fmt_metrics(m) -> Optional[dict]:
 
 
 def _calculate_acctxt(original_text: str, recovered_text: str) -> dict:
-    """
-    Hitung AccTxt = (D / T) * 100%
-    D : jumlah bit yang identik antara teks asli dan teks terdekripsi
-    T : total bit pesan asli
-    Perbandingan dilakukan bit-per-bit pada representasi UTF-8.
-    """
     orig_bytes = original_text.encode('utf-8')
     recv_bytes = recovered_text.encode('utf-8')
 
-    T = len(orig_bytes) * 8  # total bit pesan asli
+    T = len(orig_bytes) * 8
 
     if T == 0:
         return {"acc_txt": 100.0, "D": 0, "T": 0, "bit_errors": 0}
 
-    # Bandingkan hanya sepanjang teks yang ada di kedua sisi
     min_len = min(len(orig_bytes), len(recv_bytes))
     orig_bits = np.unpackbits(np.frombuffer(orig_bytes[:min_len], dtype=np.uint8))
     recv_bits = np.unpackbits(np.frombuffer(recv_bytes[:min_len], dtype=np.uint8))
 
-    # Bit yang benar pada bagian yang bisa dibandingkan
     matched = int(np.sum(orig_bits == recv_bits))
 
-    # Bit yang hilang karena panjang recv lebih pendek dihitung sebagai salah
     D = matched
     bit_errors = T - D
     acc_txt = round((D / T) * 100, 4)
@@ -281,6 +272,7 @@ async def upload_medical_data(
             photo_path=_normalize_path(orig_photo_path),
             mri_path=_normalize_path(orig_mri_path),
             stego_photo_path=_normalize_path(stego_out_path),
+            embed_time_seconds=time_total,
         )
         db.add(db_record)
         db.commit()
@@ -300,8 +292,6 @@ async def upload_medical_data(
             layer2_brisque=nriqa_l2['brisque'],
             layer2_niqe=nriqa_l2['niqe'],
             layer2_piqe=nriqa_l2['piqe'],
-            # AccTxt tidak dihitung saat upload karena teks asli belum dibandingkan
-            # dengan hasil dekripsi — ini hanya tersedia saat proses ekstraksi
         ))
         db.commit()
 
@@ -453,13 +443,11 @@ async def extract_medical_data(
 
         extract_time = round(time.time() - t_start, 4)
 
-        # ── Hitung AccTxt ──────────────────────────────────────────────────────
         acctxt_result = {"acc_txt": None, "D": None, "T": None, "bit_errors": None}
         if orig_txt_path and os.path.exists(orig_txt_path):
             with open(orig_txt_path, "r", encoding="utf-8") as f:
                 original_text = f.read()
             acctxt_result = _calculate_acctxt(original_text, decrypted)
-        # ──────────────────────────────────────────────────────────────────────
 
         metrics_l1 = {"mse": 0.0, "psnr": 100.0, "ssim": 1.0}
         if orig_mri_path and os.path.exists(orig_mri_path):
@@ -477,6 +465,9 @@ async def extract_medical_data(
 
         nriqa_l1 = LSBHandler.calculate_nriqa_metrics(extracted_mri_img, mode='L')
         nriqa_l2 = LSBHandler.calculate_nriqa_metrics(cleaned_photo_img, mode='RGB')
+
+        record.extract_time_seconds = extract_time
+        db.commit()
 
         all_metrics = db.query(ImageQualityMetric).filter(ImageQualityMetric.record_id == record_id).order_by(ImageQualityMetric.metric_id.asc()).all()
         if len(all_metrics) >= 2:
@@ -538,7 +529,7 @@ async def extract_medical_data(
                 "extraction": {
                     "layer1_mri_stego": {**metrics_l1, **nriqa_l1},
                     "layer2_photo_stego": {**metrics_l2, **nriqa_l2},
-                    "acc_txt": acctxt_result,  # ← fix: acc_txt masuk ke dalam extraction
+                    "acc_txt": acctxt_result,
                 }
             },
             "file_sizes": {
