@@ -32,6 +32,8 @@ class MedicalRecordBase(BaseModel):
     photo_path: Optional[str] = None
     mri_path: Optional[str] = None
     stego_photo_path: Optional[str] = None
+    embed_time_seconds: Optional[float] = None
+    extract_time_seconds: Optional[float] = None
 
 class MedicalRecordCreate(MedicalRecordBase):
     pass
@@ -55,7 +57,6 @@ class ImageQualityMetricBase(BaseModel):
     layer2_brisque: Optional[float] = None
     layer2_niqe: Optional[float] = None
     layer2_piqe: Optional[float] = None
-    # --- AccTxt fields ---
     acc_txt: Optional[float] = None
     acc_txt_D: Optional[int] = None
     acc_txt_T: Optional[int] = None

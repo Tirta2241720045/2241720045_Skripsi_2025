@@ -33,6 +33,8 @@ class MedicalRecord(Base):
     mri_path = Column(String(255))
     stego_photo_path = Column(String(255))
     created_at = Column(DateTime, default=get_indonesia_time)
+    embed_time_seconds = Column(Float, nullable=True)
+    extract_time_seconds = Column(Float, nullable=True)
     patient = relationship("Patient", back_populates="medical_records")
     quality_metrics = relationship("ImageQualityMetric", back_populates="medical_record")
 
@@ -52,11 +54,10 @@ class ImageQualityMetric(Base):
     layer2_brisque = Column(Float, nullable=True)
     layer2_niqe = Column(Float, nullable=True)
     layer2_piqe = Column(Float, nullable=True)
-    # --- AccTxt columns ---
-    acc_txt = Column(Float, nullable=True)          # persentase akurasi, misal 100.0
-    acc_txt_D = Column(Integer, nullable=True)       # jumlah bit yang benar terdekode
-    acc_txt_T = Column(Integer, nullable=True)       # total bit pesan asli
-    acc_txt_errors = Column(Integer, nullable=True)  # jumlah bit yang salah
+    acc_txt = Column(Float, nullable=True)
+    acc_txt_D = Column(Integer, nullable=True)
+    acc_txt_T = Column(Integer, nullable=True)
+    acc_txt_errors = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=get_indonesia_time)
     medical_record = relationship("MedicalRecord", back_populates="quality_metrics")
 
