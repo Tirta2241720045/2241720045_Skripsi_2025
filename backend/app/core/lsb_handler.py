@@ -3,8 +3,8 @@ import numpy as np
 import math
 import struct
 import io
-
-
+import torch
+import pyiqa
 class LSBHandler:
 
     @staticmethod
@@ -109,112 +109,69 @@ class LSBHandler:
         return Image.open(io.BytesIO(data_bytes))
 
     @staticmethod
-    def calculate_metrics(orig_img: Image.Image, stego_img: Image.Image, mode: str = 'L') -> dict:
+    def calculate_metrics(
+        orig_img: Image.Image, stego_img: Image.Image, mode: str = 'L'
+    ) -> dict:
         orig = np.array(orig_img.convert(mode), dtype=np.float64)
         steg = np.array(stego_img.convert(mode), dtype=np.float64)
         if orig.shape != steg.shape:
-            steg = np.array(stego_img.convert(mode).resize((orig.shape[1], orig.shape[0]), Image.Resampling.LANCZOS), dtype=np.float64)
-        mse = float(np.mean((orig - steg) ** 2))
+            steg = np.array(
+                stego_img.convert(mode).resize(
+                    (orig.shape[1], orig.shape[0]), Image.Resampling.LANCZOS
+                ),
+                dtype=np.float64,
+            )
+        mse  = float(np.mean((orig - steg) ** 2))
         psnr = 100.0 if mse == 0 else min(10 * math.log10(255.0 ** 2 / mse), 100.0)
         try:
             if mode == 'RGB':
-                ssim_val = float(np.mean([LSBHandler._ssim_channel(orig[:, :, c], steg[:, :, c]) for c in range(3)]))
+                ssim_val = float(np.mean([
+                    LSBHandler._ssim_channel(orig[:, :, c], steg[:, :, c])
+                    for c in range(3)
+                ]))
             else:
                 ssim_val = LSBHandler._ssim_channel(orig, steg)
         except Exception:
             ssim_val = 1.0
-        return {'mse': round(max(0.0, mse), 6), 'psnr': round(max(0.0, psnr), 4), 'ssim': round(max(0.0, min(ssim_val, 1.0)), 6)}
-
-    @staticmethod
-    def calculate_nriqa_metrics(img: Image.Image, mode: str = 'L') -> dict:
-        import warnings
-        brisque_score = None
-        niqe_score = None
-        piqe_score = None
-
-        img_gray = img.convert('L')
-        img_array = np.array(img_gray, dtype=np.float64)
-
-        try:
-            import brisque
-            bq = brisque.BRISQUE(url=False)
-            brisque_score = round(float(bq.score(img_gray)), 4)
-        except Exception:
-            try:
-                h, w = img_array.shape
-                mu = np.mean(img_array)
-                sigma = np.std(img_array)
-                if sigma > 1e-6:
-                    normalized = (img_array - mu) / sigma
-                    kurtosis = float(np.mean(normalized ** 4))
-                    skewness = float(np.mean(normalized ** 3))
-                    brisque_score = round(abs(kurtosis - 3) * 10 + abs(skewness) * 5, 4)
-                else:
-                    brisque_score = 0.0
-            except Exception:
-                brisque_score = None
-
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                from piq import niqe
-                import torch
-                tensor = torch.tensor(img_array / 255.0, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                niqe_score = round(float(niqe(tensor).item()), 4)
-        except Exception:
-            try:
-                h, w = img_array.shape
-                block_size = 32
-                scores = []
-                for i in range(0, h - block_size, block_size):
-                    for j in range(0, w - block_size, block_size):
-                        block = img_array[i:i + block_size, j:j + block_size]
-                        mu = np.mean(block)
-                        sigma = np.std(block)
-                        if sigma > 1e-6:
-                            scores.append(abs(float(np.mean(((block - mu) / sigma) ** 2)) - 1))
-                niqe_score = round(float(np.mean(scores)), 4) if scores else None
-            except Exception:
-                niqe_score = None
-
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                from piq import piqe
-                import torch
-                tensor = torch.tensor(img_array / 255.0, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                piqe_score = round(float(piqe(tensor).item()), 4)
-        except Exception:
-            try:
-                h, w = img_array.shape
-                block_size = 16
-                noisy_blocks = []
-                for i in range(0, h - block_size, block_size):
-                    for j in range(0, w - block_size, block_size):
-                        block = img_array[i:i + block_size, j:j + block_size]
-                        variance = float(np.var(block))
-                        mean_val = float(np.mean(block))
-                        if mean_val > 1e-6:
-                            noisy_blocks.append(variance / (mean_val + 1e-6))
-                noisy_blocks.sort(reverse=True)
-                top_n = max(1, len(noisy_blocks) // 4)
-                piqe_score = round(float(np.mean(noisy_blocks[:top_n])), 4) if noisy_blocks else None
-            except Exception:
-                piqe_score = None
-
         return {
-            'brisque': brisque_score,
-            'niqe': niqe_score,
-            'piqe': piqe_score,
+            'mse':  round(max(0.0, mse),  6),
+            'psnr': round(max(0.0, psnr), 4),
+            'ssim': round(max(0.0, min(ssim_val, 1.0)), 6),
         }
 
     @staticmethod
+    def calculate_nriqa_metrics(img: Image.Image, mode: str = 'L') -> dict:
+        brisque_score = niqe_score = piqe_score = None
+        print(f"\n[INFO] NRIQA: mode={mode}, ukuran={img.size}")
+        try:
+            img_np = np.array(img.convert('RGB')).astype(np.float32) / 255.0
+            tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0)
+            for name, kwargs in [
+                ('brisque', {'test_y_channel': True}),
+                ('niqe',    {'test_y_channel': True}),
+                ('piqe',    {}),
+            ]:
+                try:
+                    metric = pyiqa.create_metric(name, device='cpu', **kwargs)
+                    score  = round(metric(tensor).item(), 4)
+                    if   name == 'brisque': brisque_score = score
+                    elif name == 'niqe':    niqe_score    = score
+                    else:                   piqe_score    = score
+                    print(f"[SUCCESS] {name.upper()}: {score}")
+                except Exception as e:
+                    print(f"[ERROR] {name.upper()} gagal: {type(e).__name__} - {e}")
+        except Exception as e:
+            print(f"[ERROR] pyiqa gagal: {e}")
+        print(f"[INFO] Hasil: BRISQUE={brisque_score}, NIQE={niqe_score}, PIQE={piqe_score}\n")
+        return {'brisque': brisque_score, 'niqe': niqe_score, 'piqe': piqe_score}
+
+    @staticmethod
     def _ssim_channel(a: np.ndarray, b: np.ndarray) -> float:
-        C1 = (0.01 * 255) ** 2
-        C2 = (0.03 * 255) ** 2
+        C1  = (0.01 * 255) ** 2
+        C2  = (0.03 * 255) ** 2
         mu_a, mu_b = a.mean(), b.mean()
-        s2_a, s2_b = a.var(), b.var()
-        cov = float(np.cov(a.ravel(), b.ravel())[0, 1])
+        s2_a, s2_b = a.var(),  b.var()
+        cov        = float(np.cov(a.ravel(), b.ravel())[0, 1])
         num = (2 * mu_a * mu_b + C1) * (2 * cov + C2)
         den = (mu_a ** 2 + mu_b ** 2 + C1) * (s2_a + s2_b + C2)
         return 1.0 if den == 0 else float(num / den)
