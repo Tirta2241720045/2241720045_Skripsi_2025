@@ -29,80 +29,47 @@ for d in [DIR_ORIGINAL, DIR_EMBEDDING, DIR_EXTRACT, DIR_VISUAL]:
 MRI_BORDER_RATIO = 0.15
 PHOTO_BORDER_RATIO = 0.15
 
-
-# ---------------------------------------------------------------------------
-# TEXT NORMALIZATION
-# ---------------------------------------------------------------------------
-
 def normalize_text(text: str) -> str:
-    """
-    Normalisasi teks secara menyeluruh untuk memastikan konsistensi bit-level
-    antara teks yang di-embed dan teks yang diekstrak:
-
-    1. NFC Unicode normalization  → satukan karakter komposit (é = e + ́ → é)
-    2. Ganti karakter typographic → karakter ASCII standar
-       - curly quotes " " → "
-       - curly quotes ' ' → '
-       - em-dash — / en-dash – → hyphen -
-       - ellipsis … → ...
-       - non-breaking space \xa0 → spasi biasa
-       - zero-width space / BOM → dihapus
-    3. Normalisasi line ending   → selalu \n (Unix)
-    4. Strip BOM jika ada
-    """
-    # Hapus BOM jika ada
     text = text.lstrip('\ufeff')
 
-    # Unicode NFC normalization (satukan karakter komposit)
     text = unicodedata.normalize('NFC', text)
 
-    # Ganti karakter typographic umum ke ASCII
     REPLACEMENTS = {
-        '\u201c': '"',   # left double quotation mark  "
-        '\u201d': '"',   # right double quotation mark "
-        '\u2018': "'",   # left single quotation mark  '
-        '\u2019': "'",   # right single quotation mark '
-        '\u2014': '-',   # em dash                     —
-        '\u2013': '-',   # en dash                     –
-        '\u2012': '-',   # figure dash                 ‒
-        '\u2011': '-',   # non-breaking hyphen         ‑
-        '\u2010': '-',   # hyphen                      ‐
-        '\u2026': '...', # horizontal ellipsis         …
-        '\u00a0': ' ',   # non-breaking space          (NBSP)
-        '\u200b': '',    # zero-width space
-        '\u200c': '',    # zero-width non-joiner
-        '\u200d': '',    # zero-width joiner
-        '\u00ad': '',    # soft hyphen
-        '\u2002': ' ',   # en space
-        '\u2003': ' ',   # em space
-        '\u2009': ' ',   # thin space
-        '\u202f': ' ',   # narrow no-break space
-        '\u0000': '',    # null byte
+        '\u201c': '"',   
+        '\u201d': '"',   
+        '\u2018': "'",  
+        '\u2019': "'",   
+        '\u2014': '-',   
+        '\u2013': '-',   
+        '\u2012': '-',   
+        '\u2011': '-',   
+        '\u2010': '-',   
+        '\u2026': '...', 
+        '\u00a0': ' ',  
+        '\u200b': '',    
+        '\u200c': '',   
+        '\u200d': '',    
+        '\u00ad': '',    
+        '\u2002': ' ',   
+        '\u2003': ' ',   
+        '\u2009': ' ',   
+        '\u202f': ' ',  
+        '\u0000': '',    
     }
     for src, dst in REPLACEMENTS.items():
         text = text.replace(src, dst)
 
-    # Normalisasi line ending → \n
     text = text.replace('\r\n', '\n').replace('\r', '\n')
 
     return text
 
 
 def normalize_text_bytes(raw: bytes) -> str:
-    """
-    Decode bytes ke string dengan deteksi encoding, lalu normalisasi.
-    Mencoba UTF-8 dulu, fallback ke latin-1.
-    """
     try:
         text = raw.decode('utf-8')
     except UnicodeDecodeError:
         text = raw.decode('latin-1')
     return normalize_text(text)
-
-
-# ---------------------------------------------------------------------------
-# HELPER FUNCTIONS
-# ---------------------------------------------------------------------------
 
 def _normalize_path(path: str) -> str:
     return path.replace('\\', '/') if path else path
@@ -199,13 +166,6 @@ def _fmt_metrics(m) -> Optional[dict]:
 
 
 def _calculate_acctxt(original_text: str, recovered_text: str) -> dict:
-    """
-    Hitung akurasi bit antara teks original dan teks hasil ekstraksi.
-    Kedua teks di-normalisasi terlebih dahulu sebelum dibandingkan
-    sehingga perbedaan line ending / karakter tipografis tidak dihitung
-    sebagai error.
-    """
-    # Normalisasi keduanya sebelum dibandingkan
     original_text = normalize_text(original_text)
     recovered_text = normalize_text(recovered_text)
 
@@ -234,11 +194,6 @@ def _calculate_acctxt(original_text: str, recovered_text: str) -> dict:
         "bit_errors": bit_errors,
     }
 
-
-# ---------------------------------------------------------------------------
-# ENDPOINTS
-# ---------------------------------------------------------------------------
-
 @router.post("/upload")
 async def upload_medical_data(
     patient_id: int = Form(...),
@@ -265,10 +220,6 @@ async def upload_medical_data(
     if len(txt_bytes) > 500 * 1024:
         raise HTTPException(status_code=400, detail="Ukuran data medis maksimal 500 KB")
 
-    # -----------------------------------------------------------------------
-    # NORMALISASI TEKS — dilakukan SEKALI di sini, digunakan konsisten
-    # untuk embed, simpan ke disk, dan perbandingan acc_txt
-    # -----------------------------------------------------------------------
     txt_content = normalize_text_bytes(txt_bytes)
 
     try:
@@ -299,14 +250,12 @@ async def upload_medical_data(
     try:
         t_total = time.time()
 
-        img_photo_rgb.save(orig_photo_path, format='PNG', compress_level=0)
+        img_photo_rgb.save(orig_photo_path, format='PNG', compress_level=9)
         img_mri_gray.save(orig_mri_path, format='PNG', compress_level=0)
 
-        # Simpan teks yang SUDAH dinormalisasi ke disk (newline='\n', no BOM)
         with open(orig_txt_path, "w", encoding="utf-8", newline='\n') as f:
             f.write(txt_content)
 
-        # Enkripsi teks yang SUDAH dinormalisasi
         encrypted = aes_handler.encrypt(txt_content)
         data_to_embed = _pack_encrypted(encrypted)
 
@@ -332,7 +281,7 @@ async def upload_medical_data(
         stego_img = LSBHandler.embed_to_rgb_geometric(img_photo_rgb, mri_stego_img, border_ratio=PHOTO_BORDER_RATIO)
         time_layer2 = round(time.time() - t2, 4)
 
-        stego_img.save(stego_out_path, format='PNG', compress_level=0)
+        stego_img.save(stego_out_path, format='PNG', compress_level=9)
 
         metrics_l1 = LSBHandler.calculate_metrics(img_mri_gray, mri_stego_img, mode='L')
         metrics_l2 = LSBHandler.calculate_metrics(img_photo_rgb, stego_img, mode='RGB')
@@ -346,8 +295,8 @@ async def upload_medical_data(
         mri_stego_img.save(buf, format='PNG')
         n_bits_l2 = (len(buf.getvalue()) + 4) * 8
         vis_photo_img = LSBHandler.generate_lsb_visualization_rgb_geometric(img_photo_rgb, stego_img, n_bits_l2, border_ratio=PHOTO_BORDER_RATIO)
-        _save_image(vis_mri_img, vis_mri_path, compress_level=0)
-        _save_image(vis_photo_img, vis_photo_path, compress_level=0)
+        _save_image(vis_mri_img, vis_mri_path, compress_level=9)
+        _save_image(vis_photo_img, vis_photo_path, compress_level=9)
         time_vis = round(time.time() - t_vis_start, 4)
 
         time_total = round(time.time() - t_total, 4)
@@ -526,9 +475,6 @@ async def extract_medical_data(
         ciphertext, iv, mac = _unpack_encrypted(raw)
         decrypted = aes_handler.decrypt(ciphertext, iv, mac)
 
-        # -----------------------------------------------------------------------
-        # Normalisasi teks hasil dekripsi sebelum disimpan dan dibandingkan
-        # -----------------------------------------------------------------------
         decrypted = normalize_text(decrypted)
 
         with open(ext_txt_path, "w", encoding="utf-8", newline='\n') as f:
@@ -539,20 +485,14 @@ async def extract_medical_data(
         stego_array = np.array(stego_img, dtype=np.uint8)
         cleaned_photo_array = stego_array & 0xFE
         cleaned_photo_img = Image.fromarray(cleaned_photo_array, mode='RGB')
-        _save_image(cleaned_photo_img, ext_photo_path, compress_level=0)
+        _save_image(cleaned_photo_img, ext_photo_path, compress_level=9)
 
         extract_time = round(time.time() - t_start, 4)
 
-        # -----------------------------------------------------------------------
-        # Baca teks original dari disk → normalisasi → bandingkan
-        # (file sudah dinormalisasi saat upload, tapi normalize lagi untuk
-        # memastikan konsistensi jika file dimodifikasi manual)
-        # -----------------------------------------------------------------------
         acctxt_result = {"acc_txt": None, "D": None, "T": None, "bit_errors": None}
         if orig_txt_path and os.path.exists(orig_txt_path):
             with open(orig_txt_path, "r", encoding="utf-8", newline='') as f:
                 original_text = f.read()
-            # _calculate_acctxt sudah memanggil normalize_text di dalamnya
             acctxt_result = _calculate_acctxt(original_text, decrypted)
 
         metrics_l1 = {"mse": 0.0, "psnr": 100.0, "ssim": 1.0}

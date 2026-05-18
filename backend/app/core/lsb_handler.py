@@ -5,6 +5,7 @@ import struct
 import io
 import torch
 import pyiqa
+
 class LSBHandler:
 
     @staticmethod
@@ -142,7 +143,6 @@ class LSBHandler:
     @staticmethod
     def calculate_nriqa_metrics(img: Image.Image, mode: str = 'L') -> dict:
         brisque_score = niqe_score = piqe_score = None
-        print(f"\n[INFO] NRIQA: mode={mode}, ukuran={img.size}")
         try:
             img_np = np.array(img.convert('RGB')).astype(np.float32) / 255.0
             tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0)
@@ -154,15 +154,16 @@ class LSBHandler:
                 try:
                     metric = pyiqa.create_metric(name, device='cpu', **kwargs)
                     score  = round(metric(tensor).item(), 4)
-                    if   name == 'brisque': brisque_score = score
-                    elif name == 'niqe':    niqe_score    = score
-                    else:                   piqe_score    = score
-                    print(f"[SUCCESS] {name.upper()}: {score}")
-                except Exception as e:
-                    print(f"[ERROR] {name.upper()} gagal: {type(e).__name__} - {e}")
-        except Exception as e:
-            print(f"[ERROR] pyiqa gagal: {e}")
-        print(f"[INFO] Hasil: BRISQUE={brisque_score}, NIQE={niqe_score}, PIQE={piqe_score}\n")
+                    if name == 'brisque':
+                        brisque_score = score
+                    elif name == 'niqe':
+                        niqe_score = score
+                    else:
+                        piqe_score = score
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return {'brisque': brisque_score, 'niqe': niqe_score, 'piqe': piqe_score}
 
     @staticmethod
