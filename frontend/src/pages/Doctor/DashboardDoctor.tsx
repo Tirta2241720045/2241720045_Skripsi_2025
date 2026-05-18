@@ -1,4 +1,3 @@
-// frontend/src/pages/doctor/DashboardMedical.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { getAllPatients, PatientResponse } from '../../api/patients';
 import { extractMedicalData, getMedicalRecordsByPatient, MedicalRecordItem, ExtractMedicalResponse, LayerMetrics, AccTxtResult } from '../../api/medical';
@@ -49,7 +48,6 @@ const PIPELINE_INFO = {
   error: { icon: '⚠️', title: 'Pipeline Failed', body: 'An error occurred during extraction. Please verify the stego image integrity and try again.' },
 };
 
-// ─── MetricBadge ─────────────────────────────────────────────────────────────
 const MetricBadge = ({ label, val, type }: { label: string; val: string; type: '' | 'good' | 'ok' | 'bad' }) => (
   <div className={`dmc-mbadge ${type}`}>
     <span className="dmc-mbadge-l">{label}</span>
@@ -57,7 +55,6 @@ const MetricBadge = ({ label, val, type }: { label: string; val: string; type: '
   </div>
 );
 
-// ─── AccTxtSlideContent ───────────────────────────────────────────────────────
 const AccTxtSlideContent = ({ acctxt }: { acctxt: AccTxtResult | null | undefined }) => {
   if (!acctxt || acctxt.acc_txt === null || acctxt.T === null) {
     return <div className="dmc-metrics-layer-group" style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 11, padding: '16px 10px' }}>No AccTxt data available</div>;
@@ -95,8 +92,6 @@ const AccTxtSlideContent = ({ acctxt }: { acctxt: AccTxtResult | null | undefine
   );
 };
 
-// ─── FileSizeSlideContent ─────────────────────────────────────────────────────
-// FIX #3: File size content rendered as a slide inside MetricsSlider
 const FileSizeSlideContent = ({
   stegoKb,
   extractFileSizes,
@@ -108,7 +103,6 @@ const FileSizeSlideContent = ({
   } | null;
 }) => {
   if (extractFileSizes) {
-    // Extraction mode: show comparison table
     const rows = [
       { label: 'Photo', orig: extractFileSizes.original_photo_kb, ext: extractFileSizes.extracted_photo_kb },
       { label: 'MRI',   orig: extractFileSizes.original_mri_kb,   ext: extractFileSizes.extracted_mri_kb },
@@ -145,7 +139,6 @@ const FileSizeSlideContent = ({
     );
   }
 
-  // Embedding mode: show stego size only
   return (
     <div className="dmc-metrics-layer-group">
       <div className="dmc-metrics-layer-label">File Size</div>
@@ -159,8 +152,6 @@ const FileSizeSlideContent = ({
   );
 };
 
-// ─── MetricsSlider ────────────────────────────────────────────────────────────
-// FIX #3: 4 slides — FR-IQA, NR-IQA, AccTxt, File Size. Title changed to "Metric Quality".
 const MetricsSlider = ({ metrics, stegoKb, acctxt, extractFileSizes }: {
   metrics: LayerMetrics;
   stegoKb?: number;
@@ -252,7 +243,6 @@ const MetricsSlider = ({ metrics, stegoKb, acctxt, extractFileSizes }: {
   );
 };
 
-// ─── Lightbox ─────────────────────────────────────────────────────────────────
 const Lightbox = ({ src, onClose }: { src: string; onClose: () => void }) => (
   <div className="dmc-lightbox" onClick={onClose}>
     <img src={src} alt="" onClick={e => e.stopPropagation()} />
@@ -260,7 +250,6 @@ const Lightbox = ({ src, onClose }: { src: string; onClose: () => void }) => (
   </div>
 );
 
-// ─── AnnotPanel ───────────────────────────────────────────────────────────────
 const AnnotPanel = ({ originalData, annotation, onAnnotChange, isLoading }: {
   originalData: string; annotation: string; onAnnotChange: (v: string) => void;
   isLoading?: boolean;
@@ -283,7 +272,6 @@ const AnnotPanel = ({ originalData, annotation, onAnnotChange, isLoading }: {
   </div>
 );
 
-// ─── ExtractAnnotPanel ────────────────────────────────────────────────────────
 const ExtractAnnotPanel = ({ originalData, annotation, onAnnotChange, photoUrl, mriUrl, onPhotoClick, onMriClick }: {
   originalData: string; annotation: string; onAnnotChange: (v: string) => void;
   photoUrl: string; mriUrl: string; onPhotoClick: () => void; onMriClick: () => void;
@@ -321,17 +309,14 @@ const ExtractAnnotPanel = ({ originalData, annotation, onAnnotChange, photoUrl, 
   </div>
 );
 
-// ─── PipelineContent ──────────────────────────────────────────────────────────
 const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: {
   steps: PipelineStep[]; pipelineStatus: PipelineStatus;
   record: MedicalRecordItem | null; extracted: ExtractMedicalResponse | null;
   plInfo: typeof PIPELINE_INFO[PipelineStatus];
 }) => {
-  // AccTxt: extraction result takes priority, else fall back to embedding record
   const extractionAccTxt: AccTxtResult | null = extracted?.quality_metrics?.extraction?.acc_txt ?? null;
   const embeddingAccTxt: AccTxtResult | null  = record?.quality_metrics?.extraction?.acc_txt ?? null;
 
-  // File sizes for extraction comparison
   const extractFileSizes = (extracted?.file_sizes && record?.file_sizes) ? {
     original_photo_kb: record.file_sizes.original_photo_kb,
     original_mri_kb:   record.file_sizes.original_mri_kb,
@@ -408,7 +393,6 @@ const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: {
   );
 };
 
-// ─── DashboardDoctor ──────────────────────────────────────────────────────────
 const DashboardDoctor = () => {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
