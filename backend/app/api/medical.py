@@ -27,7 +27,7 @@ for d in [DIR_ORIGINAL, DIR_EMBEDDING, DIR_EXTRACT, DIR_VISUAL]:
     os.makedirs(d, exist_ok=True)
 
 MRI_BORDER_RATIO = 0.15
-PHOTO_BORDER_RATIO = 0.15
+PHOTO_BORDER_RATIO = 0.05
 
 def normalize_text(text: str) -> str:
     text = text.lstrip('\ufeff')

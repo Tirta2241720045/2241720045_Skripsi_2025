@@ -79,6 +79,8 @@ class LSBHandler:
         secret_bytes = buf.getvalue()
         bits, n_bits = LSBHandler._pack_data(secret_bytes)
         roni_idx = LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio)
+        np.random.seed(1234567890)
+        np.random.shuffle(roni_idx)
         if n_bits > roni_idx.size:
             raise ValueError(f"Data terlalu besar. Kapasitas: {roni_idx.size} bits, Data: {n_bits} bits.")
         target_idx = roni_idx[:n_bits]
@@ -105,6 +107,8 @@ class LSBHandler:
         height, width, _ = img_array.shape
         flat = img_array.ravel()
         roni_idx = LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio)
+        np.random.seed(1234567890)
+        np.random.shuffle(roni_idx)
         if roni_idx.size < 32:
             return None
         bits_source = (flat[roni_idx] & 1).astype(np.uint8)
