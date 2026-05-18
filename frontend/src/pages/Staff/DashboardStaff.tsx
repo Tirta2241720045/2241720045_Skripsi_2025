@@ -1,4 +1,3 @@
-// frontend/src/pages/Staff/DashboardStaff.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from '../../components/shared/Navbar';
 import { getAllPatients, createPatient, updatePatient, deletePatient, PatientResponse, Gender } from '../../api/patients';
@@ -15,7 +14,6 @@ interface FileValidation {
   isValid: boolean; errors: string[]; format: string;
   dimensions?: { width: number; height: number };
   size: number; isGrayscale?: boolean; lineCount?: number; charCount?: number;
-  croppedSize?: number;
 }
 
 const BASE_URL = 'http://localhost:8000';
@@ -42,25 +40,6 @@ async function fetchTextContent(path: string): Promise<string> {
   } catch {
     return 'Failed to load file content';
   }
-}
-
-function autoCropSquare(imageSrc: string): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const size = Math.min(img.width, img.height);
-      const srcX = (img.width - size) / 2;
-      const srcY = (img.height - size) / 2;
-      const canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(img, srcX, srcY, size, size, 0, 0, size, size);
-      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Crop failed')), 'image/png');
-    };
-    img.onerror = reject;
-    img.src = imageSrc;
-  });
 }
 
 const validateImageFile = async (file: File, expectedType: 'color' | 'grayscale'): Promise<FileValidation> => {
@@ -95,7 +74,7 @@ const validateImageFile = async (file: File, expectedType: 'color' | 'grayscale'
     const totalPixels = Math.min(data.length / 4, 10000);
     for (let i = 0; i < totalPixels * 4; i += 4) {
       const r = data[i], g = data[i + 1], b = data[i + 2];
-      if (Math.abs(r - g) > 10 || Math.abs(g - b) > 10 || Math.abs(r - b) > 10) {
+      if (Math.abs(r - g) > 5 || Math.abs(g - b) > 5 || Math.abs(r - b) > 5) {
         colorCount++;
         if (colorCount > totalPixels * 0.1) { isColorDetected = true; break; }
       }
@@ -105,11 +84,10 @@ const validateImageFile = async (file: File, expectedType: 'color' | 'grayscale'
     if (expectedType === 'grayscale' && !isGrayscale) errors.push('MRI Image must be grayscale');
   }
 
-  const cropSize = Math.min(img.width, img.height);
   return {
     isValid: errors.length === 0, errors, format: file.type,
     dimensions: { width: img.width, height: img.height },
-    size: file.size, isGrayscale, croppedSize: cropSize,
+    size: file.size, isGrayscale,
   };
 };
 
@@ -138,7 +116,6 @@ const calcAge = (dob: string) => {
   return Math.floor((Date.now() - new Date(dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)) + ' years old';
 };
 
-// ─── MetricBadge (sama dengan doctor) ─────────────────────────────────────────
 const MetricBadge = ({ label, val, type }: { label: string; val: string; type: '' | 'good' | 'ok' | 'bad' }) => (
   <div className={`dmc-mbadge ${type}`}>
     <span className="dmc-mbadge-l">{label}</span>
@@ -146,7 +123,6 @@ const MetricBadge = ({ label, val, type }: { label: string; val: string; type: '
   </div>
 );
 
-// ─── AccTxtSlideContent (sama dengan doctor) ───────────────────────────────────
 const AccTxtSlideContent = ({ acctxt }: { acctxt: AccTxtResult | null | undefined }) => {
   if (!acctxt || acctxt.acc_txt === null || acctxt.T === null) {
     return <div className="dmc-metrics-layer-group" style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 11, padding: '16px 10px' }}>No AccTxt data available</div>;
@@ -184,7 +160,6 @@ const AccTxtSlideContent = ({ acctxt }: { acctxt: AccTxtResult | null | undefine
   );
 };
 
-// ─── FileSizeSlideContent (sama dengan doctor) ─────────────────────────────────
 const FileSizeSlideContent = ({ stegoKb }: { stegoKb?: number }) => {
   return (
     <div className="dmc-metrics-layer-group">
@@ -199,7 +174,6 @@ const FileSizeSlideContent = ({ stegoKb }: { stegoKb?: number }) => {
   );
 };
 
-// ─── MetricsSlider (sama dengan doctor - 4 slides) ────────────────────────────
 const MetricsSlider = ({ metrics, stegoKb, acctxt }: {
   metrics: LayerMetrics;
   stegoKb?: number;
@@ -341,7 +315,6 @@ const DashboardStaff = () => {
 
   const activeRecord = medicalRecords[activeRecordIndex] ?? null;
 
-  // AccTxt dari record aktif (extraction metrics)
   const activeAccTxt: AccTxtResult | null =
     activeRecord?.quality_metrics?.extraction?.acc_txt ?? null;
 
@@ -573,13 +546,11 @@ const DashboardStaff = () => {
     }
     setIsUploading(true);
     try {
-      const photoBlob = await autoCropSquare(patientPhotoPreview!);
-      const mriBlob = await autoCropSquare(mriImagePreview!);
       const fd = new FormData();
       fd.append('patient_id', targetPatientId.toString());
       fd.append('medical_data', diagnosisFile, diagnosisFile.name);
-      fd.append('mri_image', new File([mriBlob], 'mri.png', { type: 'image/png' }));
-      fd.append('patient_photo', new File([photoBlob], 'photo.png', { type: 'image/png' }));
+      fd.append('mri_image', mriImageFile);
+      fd.append('patient_photo', patientPhotoFile);
       const [result] = await Promise.all([uploadMedicalData(fd), runProcessSteps()]);
       showNotification(`Record #${result.record_id} saved successfully`, 'success');
 
@@ -868,7 +839,6 @@ const DashboardStaff = () => {
         ))}
       </div>
 
-      {/* FIX #3: Unified MetricsSlider — same as doctor */}
       {latestMetrics && (
         <MetricsSlider
           metrics={latestMetrics as LayerMetrics}
@@ -877,7 +847,6 @@ const DashboardStaff = () => {
         />
       )}
 
-      {/* Execution time card for embedding (not available in staff view yet) */}
       {processComplete && latestMetrics && (
         <div className="dmc-exec-time-card">
           <div className="dmc-exec-time-icon">⏱</div>
@@ -1153,7 +1122,6 @@ const DashboardStaff = () => {
                 </div>
               </div>
 
-              {/* Edit Panel - same style as doctor's edit panel */}
               <div className={`dmc-edit-panel-wrapper ${showEditForm ? 'open' : ''}`}
                 style={{ maxHeight: showEditForm ? '260px' : '0px' }}>
                 <div className="dmc-edit-panel">
@@ -1231,7 +1199,6 @@ const DashboardStaff = () => {
                     )}
 
                     {activeRecord && !showUploadPanel && (
-                      // FIX #1: Sharp card variant like doctor
                       <div className="dmc-card dmc-med-card dmc-med-card-sharp">
                         <div className="dmc-card-hd">
                           <span className="dmc-card-title">Medical Record Overview</span>
