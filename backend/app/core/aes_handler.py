@@ -54,7 +54,6 @@ class AESHandler:
         if not plaintext:
             raise ValueError("Plaintext tidak boleh kosong")
         
-        # Normalisasi plaintext sebelum enkripsi
         plaintext = self._normalize_plaintext(plaintext)
         
         iv = get_random_bytes(16)
@@ -98,7 +97,6 @@ class AESHandler:
             plaintext_bytes = unpad(decrypted_padded, AES.block_size)
             plaintext = plaintext_bytes.decode('utf-8')
             
-            # Normalisasi hasil dekripsi untuk konsistensi
             plaintext = self._normalize_plaintext(plaintext)
             
             return plaintext
