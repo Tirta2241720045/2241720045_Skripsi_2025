@@ -12,6 +12,8 @@ from PIL import Image
 import io
 import unicodedata
 from typing import Optional, Tuple
+import csv
+from datetime import datetime
 
 router = APIRouter(prefix="/medical", tags=["Medical"])
 
@@ -22,45 +24,129 @@ DIR_ORIGINAL = os.path.join("files", "original")
 DIR_EMBEDDING = os.path.join("files", "embedding")
 DIR_EXTRACT = os.path.join("files", "extraction")
 DIR_VISUAL = os.path.join("files", "visualization")
+DIR_CSV = os.path.join("files", "csv")
 
-for d in [DIR_ORIGINAL, DIR_EMBEDDING, DIR_EXTRACT, DIR_VISUAL]:
+for d in [DIR_ORIGINAL, DIR_EMBEDDING, DIR_EXTRACT, DIR_VISUAL, DIR_CSV]:
     os.makedirs(d, exist_ok=True)
+
+# CSV file path untuk menyimpan data waktu per layer (untuk keperluan skripsi)
+TIMING_CSV_PATH = os.path.join(DIR_CSV, "timing_per_layer.csv")
 
 MRI_BORDER_RATIO = 0.15
 PHOTO_BORDER_RATIO = 0.05
 
+# ─────────────────────────────────────────────
+# CSV TIMING HELPER
+# ─────────────────────────────────────────────
+
+def _init_timing_csv():
+    """Buat file CSV dengan header jika belum ada."""
+    if not os.path.exists(TIMING_CSV_PATH):
+        with open(TIMING_CSV_PATH, "w", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "timestamp",
+                "record_id",
+                "patient_id",
+                "mri_resolution",
+                "photo_resolution",
+                "txt_size_kb",
+                # Embedding
+                "embed_layer1_seconds",
+                "embed_layer2_seconds",
+                "embed_total_seconds",
+                # Extraction
+                "extract_layer1_seconds",
+                "extract_layer2_seconds",
+                "extract_total_seconds",
+            ])
+
+
+def _write_embed_timing(
+    record_id: int,
+    patient_id: int,
+    mri_resolution: str,
+    photo_resolution: str,
+    txt_size_kb: float,
+    embed_layer1: float,
+    embed_layer2: float,
+    embed_total: float,
+):
+    """Tulis data waktu embedding ke CSV. Kolom ekstraksi dikosongkan dulu."""
+    _init_timing_csv()
+    with open(TIMING_CSV_PATH, "a", newline='', encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            record_id,
+            patient_id,
+            mri_resolution,
+            photo_resolution,
+            txt_size_kb,
+            embed_layer1,
+            embed_layer2,
+            embed_total,
+            "",   # extract_layer1_seconds (diisi saat ekstraksi)
+            "",   # extract_layer2_seconds
+            "",   # extract_total_seconds
+        ])
+
+
+def _update_extract_timing(
+    record_id: int,
+    extract_layer1: float,
+    extract_layer2: float,
+    extract_total: float,
+):
+    """Update baris yang sudah ada (berdasarkan record_id) dengan data waktu ekstraksi."""
+    _init_timing_csv()
+
+    rows = []
+    updated = False
+
+    with open(TIMING_CSV_PATH, "r", newline='', encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        rows.append(header)
+        for row in reader:
+            # Cari baris dengan record_id yang cocok dan kolom ekstraksi masih kosong
+            if (len(row) >= 12
+                    and str(row[1]) == str(record_id)
+                    and row[9] == ""):
+                row[9]  = str(extract_layer1)
+                row[10] = str(extract_layer2)
+                row[11] = str(extract_total)
+                updated = True
+            rows.append(row)
+
+    if updated:
+        with open(TIMING_CSV_PATH, "w", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerows(rows)
+
+
+# ─────────────────────────────────────────────
+# HELPER FUNCTIONS (tidak diubah)
+# ─────────────────────────────────────────────
+
 def normalize_text(text: str) -> str:
     text = text.lstrip('\ufeff')
-
     text = unicodedata.normalize('NFC', text)
-
     REPLACEMENTS = {
-        '\u201c': '"',   
-        '\u201d': '"',   
-        '\u2018': "'",  
-        '\u2019': "'",   
-        '\u2014': '-',   
-        '\u2013': '-',   
-        '\u2012': '-',   
-        '\u2011': '-',   
-        '\u2010': '-',   
-        '\u2026': '...', 
-        '\u00a0': ' ',  
-        '\u200b': '',    
-        '\u200c': '',   
-        '\u200d': '',    
-        '\u00ad': '',    
-        '\u2002': ' ',   
-        '\u2003': ' ',   
-        '\u2009': ' ',   
-        '\u202f': ' ',  
-        '\u0000': '',    
+        '\u201c': '"', '\u201d': '"',
+        '\u2018': "'", '\u2019': "'",
+        '\u2014': '-', '\u2013': '-',
+        '\u2012': '-', '\u2011': '-',
+        '\u2010': '-', '\u2026': '...',
+        '\u00a0': ' ', '\u200b': '',
+        '\u200c': '', '\u200d': '',
+        '\u00ad': '', '\u2002': ' ',
+        '\u2003': ' ', '\u2009': ' ',
+        '\u202f': ' ', '\u0000': '',
     }
     for src, dst in REPLACEMENTS.items():
         text = text.replace(src, dst)
-
     text = text.replace('\r\n', '\n').replace('\r', '\n')
-
     return text
 
 
@@ -121,8 +207,13 @@ def _save_image(img: Image.Image, path: str, compress_level: int = 0) -> None:
 
 def _pil_to_bytes(img: Image.Image) -> bytes:
     buf = io.BytesIO()
-    img.save(buf, format='PNG')
+    img.save(buf, format='PNG', compress_level=1)
     return buf.getvalue()
+
+
+def _estimate_png_size(img: Image.Image) -> int:
+    arr = np.array(img)
+    return int(arr.size * 1.05) + 1024
 
 
 def _pack_encrypted(encrypted: dict) -> bytes:
@@ -168,31 +259,24 @@ def _fmt_metrics(m) -> Optional[dict]:
 def _calculate_acctxt(original_text: str, recovered_text: str) -> dict:
     original_text = normalize_text(original_text)
     recovered_text = normalize_text(recovered_text)
-
     orig_bytes = original_text.encode('utf-8')
     recv_bytes = recovered_text.encode('utf-8')
-
     T = len(orig_bytes) * 8
-
     if T == 0:
         return {"acc_txt": 100.0, "D": 0, "T": 0, "bit_errors": 0}
-
     min_len = min(len(orig_bytes), len(recv_bytes))
     orig_bits = np.unpackbits(np.frombuffer(orig_bytes[:min_len], dtype=np.uint8))
     recv_bits = np.unpackbits(np.frombuffer(recv_bytes[:min_len], dtype=np.uint8))
-
     matched = int(np.sum(orig_bits == recv_bits))
-
     D = matched
     bit_errors = T - D
     acc_txt = round((D / T) * 100, 4)
+    return {"acc_txt": acc_txt, "D": D, "T": T, "bit_errors": bit_errors}
 
-    return {
-        "acc_txt": acc_txt,
-        "D": D,
-        "T": T,
-        "bit_errors": bit_errors,
-    }
+
+# ─────────────────────────────────────────────
+# ENDPOINTS
+# ─────────────────────────────────────────────
 
 @router.post("/upload")
 async def upload_medical_data(
@@ -241,8 +325,6 @@ async def upload_medical_data(
     orig_mri_path = os.path.join(DIR_ORIGINAL, f"mri_{prefix}.png")
     orig_txt_path = os.path.join(DIR_ORIGINAL, f"medical_{prefix}.txt")
     stego_out_path = os.path.join(DIR_EMBEDDING, f"stego_{prefix}.png")
-    vis_mri_path = os.path.join(DIR_VISUAL, f"vis_mri_{prefix}.png")
-    vis_photo_path = os.path.join(DIR_VISUAL, f"vis_photo_{prefix}.png")
 
     img_mri_gray = img_mri.convert('L')
     img_photo_rgb = img_photo.convert('RGB')
@@ -265,18 +347,22 @@ async def upload_medical_data(
         if len(data_to_embed) > roni_mri_bytes:
             raise HTTPException(status_code=400, detail=f"Data terlalu besar. Kapasitas RONI MRI: {roni_mri_bytes} bytes.")
 
+        # ── Layer 1 Embedding ──
         t1 = time.time()
         mri_stego_img = LSBHandler.embed_to_grayscale_geometric(img_mri_gray, data_to_embed, border_ratio=MRI_BORDER_RATIO)
         time_layer1 = round(time.time() - t1, 4)
 
-        mri_stego_size = len(_pil_to_bytes(mri_stego_img))
+        mri_stego_size = _estimate_png_size(mri_stego_img)
 
         roni_photo_capacity = LSBHandler.get_roni_capacity_border(photo_h, photo_w, PHOTO_BORDER_RATIO) * 3
         roni_photo_bytes = (roni_photo_capacity // 8) - 4
 
         if mri_stego_size > roni_photo_bytes:
-            raise HTTPException(status_code=400, detail=f"MRI stego terlalu besar. Kapasitas RONI foto: {roni_photo_bytes} bytes.")
+            actual_size = len(_pil_to_bytes(mri_stego_img))
+            if actual_size > roni_photo_bytes:
+                raise HTTPException(status_code=400, detail=f"MRI stego terlalu besar. Kapasitas RONI foto: {roni_photo_bytes} bytes.")
 
+        # ── Layer 2 Embedding ──
         t2 = time.time()
         stego_img = LSBHandler.embed_to_rgb_geometric(img_photo_rgb, mri_stego_img, border_ratio=PHOTO_BORDER_RATIO)
         time_layer2 = round(time.time() - t2, 4)
@@ -288,17 +374,6 @@ async def upload_medical_data(
         nriqa_l1 = LSBHandler.calculate_nriqa_metrics(mri_stego_img, mode='L')
         nriqa_l2 = LSBHandler.calculate_nriqa_metrics(stego_img, mode='RGB')
 
-        t_vis_start = time.time()
-        n_bits_l1 = (len(data_to_embed) + 4) * 8
-        vis_mri_img = LSBHandler.generate_lsb_visualization_grayscale_geometric(img_mri_gray, mri_stego_img, n_bits_l1, border_ratio=MRI_BORDER_RATIO)
-        buf = io.BytesIO()
-        mri_stego_img.save(buf, format='PNG')
-        n_bits_l2 = (len(buf.getvalue()) + 4) * 8
-        vis_photo_img = LSBHandler.generate_lsb_visualization_rgb_geometric(img_photo_rgb, stego_img, n_bits_l2, border_ratio=PHOTO_BORDER_RATIO)
-        _save_image(vis_mri_img, vis_mri_path, compress_level=9)
-        _save_image(vis_photo_img, vis_photo_path, compress_level=9)
-        time_vis = round(time.time() - t_vis_start, 4)
-
         time_total = round(time.time() - t_total, 4)
 
         file_sizes = {
@@ -306,10 +381,9 @@ async def upload_medical_data(
             "original_mri_kb": _file_size_kb(orig_mri_path),
             "original_photo_kb": _file_size_kb(orig_photo_path),
             "stego_kb": _file_size_kb(stego_out_path),
-            "vis_mri_kb": _file_size_kb(vis_mri_path),
-            "vis_photo_kb": _file_size_kb(vis_photo_path),
         }
 
+        # ── Simpan ke database (tidak diubah) ──
         db_record = MedicalRecord(
             patient_id=patient_id,
             medical_data_path=_normalize_path(orig_txt_path),
@@ -339,6 +413,18 @@ async def upload_medical_data(
         ))
         db.commit()
 
+        # ── Tulis timing per layer ke CSV (untuk skripsi) ──
+        _write_embed_timing(
+            record_id=db_record.record_id,
+            patient_id=patient_id,
+            mri_resolution=f"{mri_w}x{mri_h}",
+            photo_resolution=f"{photo_w}x{photo_h}",
+            txt_size_kb=file_sizes["original_txt_kb"],
+            embed_layer1=time_layer1,
+            embed_layer2=time_layer2,
+            embed_total=time_total,
+        )
+
         write_log(db, current_user.user_id, f"UPLOAD_MEDICAL: patient_id={patient_id}, record_id={db_record.record_id}")
 
         return {
@@ -346,14 +432,9 @@ async def upload_medical_data(
             "record_id": db_record.record_id,
             "stego_image": _normalize_path(stego_out_path),
             "roni_type": "geometric_border",
-            "visualization": {
-                "mri_lsb_map": _normalize_path(vis_mri_path),
-                "photo_lsb_map": _normalize_path(vis_photo_path),
-            },
             "embed_time": {
                 "layer1_seconds": time_layer1,
                 "layer2_seconds": time_layer2,
-                "visualization_seconds": time_vis,
                 "total_seconds": time_total,
             },
             "quality_metrics": {
@@ -463,18 +544,25 @@ async def extract_medical_data(
 
         stego_img = Image.open(stego_path).convert('RGB')
 
+        # ── Layer 2 Extraction ──
+        t_ext2 = time.time()
         extracted_mri_img = LSBHandler.extract_from_rgb_geometric(stego_img, border_ratio=PHOTO_BORDER_RATIO)
+        time_extract_layer2 = round(time.time() - t_ext2, 4)
+
         if extracted_mri_img is None:
             raise HTTPException(status_code=500, detail="Gagal mengekstrak MRI dari stego")
 
+        # ── Layer 1 Extraction ──
+        t_ext1 = time.time()
         extracted_bytes = LSBHandler.extract_from_grayscale_geometric(extracted_mri_img, border_ratio=MRI_BORDER_RATIO)
+        time_extract_layer1 = round(time.time() - t_ext1, 4)
+
         if not extracted_bytes:
             raise HTTPException(status_code=500, detail="Gagal menemukan data tersembunyi")
 
         raw = extracted_bytes.decode("utf-8")
         ciphertext, iv, mac = _unpack_encrypted(raw)
         decrypted = aes_handler.decrypt(ciphertext, iv, mac)
-
         decrypted = normalize_text(decrypted)
 
         with open(ext_txt_path, "w", encoding="utf-8", newline='\n') as f:
@@ -483,7 +571,7 @@ async def extract_medical_data(
         _save_image(extracted_mri_img, ext_mri_path, compress_level=0)
 
         stego_array = np.array(stego_img, dtype=np.uint8)
-        cleaned_photo_array = stego_array & 0xFE
+        cleaned_photo_array = stego_array & np.uint8(0xFE)
         cleaned_photo_img = Image.fromarray(cleaned_photo_array, mode='RGB')
         _save_image(cleaned_photo_img, ext_photo_path, compress_level=9)
 
@@ -514,6 +602,14 @@ async def extract_medical_data(
 
         record.extract_time_seconds = extract_time
         db.commit()
+
+        # ── Update timing CSV dengan data ekstraksi (untuk skripsi) ──
+        _update_extract_timing(
+            record_id=record_id,
+            extract_layer1=time_extract_layer1,
+            extract_layer2=time_extract_layer2,
+            extract_total=extract_time,
+        )
 
         all_metrics = db.query(ImageQualityMetric).filter(ImageQualityMetric.record_id == record_id).order_by(ImageQualityMetric.metric_id.asc()).all()
         if len(all_metrics) >= 2:
@@ -564,6 +660,11 @@ async def extract_medical_data(
             "patient_name": patient.full_name if patient else "Unknown",
             "medical_data": decrypted,
             "extract_time_seconds": extract_time,
+            "extract_time_per_layer": {
+                "layer1_seconds": time_extract_layer1,
+                "layer2_seconds": time_extract_layer2,
+                "total_seconds": extract_time,
+            },
             "stego_image": record.stego_photo_path,
             "photo_path": _normalize_path(ext_photo_path),
             "mri_path": _normalize_path(ext_mri_path),

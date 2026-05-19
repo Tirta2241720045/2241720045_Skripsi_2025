@@ -6,6 +6,20 @@ import io
 import torch
 import pyiqa
 
+_METRIC_CACHE: dict = {}
+
+def _get_metric(name: str, **kwargs):
+    key = name
+    if key not in _METRIC_CACHE:
+        _METRIC_CACHE[key] = pyiqa.create_metric(name, device='cpu', **kwargs)
+    return _METRIC_CACHE[key]
+
+
+def _shuffled_indices(indices: np.ndarray) -> np.ndarray:
+    perm = np.random.default_rng(1234567890).permutation(len(indices))
+    return indices[perm]
+
+
 class LSBHandler:
 
     @staticmethod
@@ -22,16 +36,17 @@ class LSBHandler:
     @staticmethod
     def _get_roni_indices_border(height: int, width: int, border_ratio: float = 0.15) -> np.ndarray:
         mask = LSBHandler._get_roni_mask_border(height, width, border_ratio)
-        return np.where(mask.ravel())[0].astype(np.int64)
+        return np.flatnonzero(mask).astype(np.int64)
 
     @staticmethod
     def _get_roni_indices_rgb_border(height: int, width: int, border_ratio: float = 0.15) -> np.ndarray:
         mask = LSBHandler._get_roni_mask_border(height, width, border_ratio)
-        pixel_indices = np.where(mask.ravel())[0].astype(np.int64)
+        pixel_indices = np.flatnonzero(mask).astype(np.int64)
         roni_flat = np.empty(pixel_indices.size * 3, dtype=np.int64)
-        roni_flat[0::3] = pixel_indices * 3
-        roni_flat[1::3] = pixel_indices * 3 + 1
-        roni_flat[2::3] = pixel_indices * 3 + 2
+        base = pixel_indices * 3
+        roni_flat[0::3] = base
+        roni_flat[1::3] = base + 1
+        roni_flat[2::3] = base + 2
         return roni_flat
 
     @staticmethod
@@ -61,13 +76,11 @@ class LSBHandler:
         height, width = img_array.shape
         flat = img_array.ravel()
         bits, n_bits = LSBHandler._pack_data(data_bytes)
-        roni_idx = LSBHandler._get_roni_indices_border(height, width, border_ratio)
-        np.random.seed(1234567890)
-        np.random.shuffle(roni_idx)
+        roni_idx = _shuffled_indices(LSBHandler._get_roni_indices_border(height, width, border_ratio))
         if n_bits > roni_idx.size:
             raise ValueError(f"Data terlalu besar. Kapasitas: {roni_idx.size} bits, Data: {n_bits} bits.")
         target_idx = roni_idx[:n_bits]
-        flat[target_idx] = (flat[target_idx] & 0xFE) | bits.astype(np.uint8)
+        flat[target_idx] = (flat[target_idx] & np.uint8(0xFE)) | bits.astype(np.uint8)
         return Image.fromarray(flat.reshape(height, width), mode='L')
 
     @staticmethod
@@ -75,17 +88,15 @@ class LSBHandler:
         cover_array = np.array(cover_img.convert('RGB'), dtype=np.uint8)
         height, width, _ = cover_array.shape
         buf = io.BytesIO()
-        secret_img.save(buf, format='PNG')
+        secret_img.save(buf, format='PNG', compress_level=1)
         secret_bytes = buf.getvalue()
         bits, n_bits = LSBHandler._pack_data(secret_bytes)
-        roni_idx = LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio)
-        np.random.seed(1234567890)
-        np.random.shuffle(roni_idx)
+        roni_idx = _shuffled_indices(LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio))
         if n_bits > roni_idx.size:
             raise ValueError(f"Data terlalu besar. Kapasitas: {roni_idx.size} bits, Data: {n_bits} bits.")
         target_idx = roni_idx[:n_bits]
         flat = cover_array.ravel()
-        flat[target_idx] = (flat[target_idx] & 0xFE) | bits.astype(np.uint8)
+        flat[target_idx] = (flat[target_idx] & np.uint8(0xFE)) | bits.astype(np.uint8)
         return Image.fromarray(cover_array, mode='RGB')
 
     @staticmethod
@@ -93,9 +104,7 @@ class LSBHandler:
         img_array = np.array(img.convert('L'), dtype=np.uint8)
         height, width = img_array.shape
         flat = img_array.ravel()
-        roni_idx = LSBHandler._get_roni_indices_border(height, width, border_ratio)
-        np.random.seed(1234567890)
-        np.random.shuffle(roni_idx)
+        roni_idx = _shuffled_indices(LSBHandler._get_roni_indices_border(height, width, border_ratio))
         if roni_idx.size < 32:
             return None
         bits_source = (flat[roni_idx] & 1).astype(np.uint8)
@@ -106,9 +115,7 @@ class LSBHandler:
         img_array = np.array(stego_img.convert('RGB'), dtype=np.uint8)
         height, width, _ = img_array.shape
         flat = img_array.ravel()
-        roni_idx = LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio)
-        np.random.seed(1234567890)
-        np.random.shuffle(roni_idx)
+        roni_idx = _shuffled_indices(LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio))
         if roni_idx.size < 32:
             return None
         bits_source = (flat[roni_idx] & 1).astype(np.uint8)
@@ -160,8 +167,7 @@ class LSBHandler:
                 ('piqe',    {}),
             ]:
                 try:
-                    metric = pyiqa.create_metric(name, device='cpu', **kwargs)
-                    score  = round(metric(tensor).item(), 4)
+                    score = round(_get_metric(name, **kwargs)(tensor).item(), 4)
                     if name == 'brisque':
                         brisque_score = score
                     elif name == 'niqe':
@@ -176,92 +182,16 @@ class LSBHandler:
 
     @staticmethod
     def _ssim_channel(a: np.ndarray, b: np.ndarray) -> float:
-        C1  = (0.01 * 255) ** 2
-        C2  = (0.03 * 255) ** 2
-        mu_a, mu_b = a.mean(), b.mean()
-        s2_a, s2_b = a.var(),  b.var()
-        cov        = float(np.cov(a.ravel(), b.ravel())[0, 1])
-        num = (2 * mu_a * mu_b + C1) * (2 * cov + C2)
+        C1 = (0.01 * 255) ** 2
+        C2 = (0.03 * 255) ** 2
+        mu_a = a.mean()
+        mu_b = b.mean()
+        a_c = a - mu_a
+        b_c = b - mu_b
+        n = a.size
+        s2_a = float(np.dot(a_c.ravel(), a_c.ravel())) / n
+        s2_b = float(np.dot(b_c.ravel(), b_c.ravel())) / n
+        cov  = float(np.dot(a_c.ravel(), b_c.ravel())) / n
+        num = (2.0 * mu_a * mu_b + C1) * (2.0 * cov + C2)
         den = (mu_a ** 2 + mu_b ** 2 + C1) * (s2_a + s2_b + C2)
         return 1.0 if den == 0 else float(num / den)
-
-    @staticmethod
-    def generate_lsb_visualization_grayscale_geometric(
-        orig_img: Image.Image, stego_img: Image.Image, n_bits_embedded: int,
-        border_ratio: float = 0.12, highlight_color: tuple = (255, 0, 0), highlight_alpha: float = 0.6
-    ) -> Image.Image:
-        orig_array = np.array(orig_img.convert('L'), dtype=np.uint8)
-        stego_array = np.array(stego_img.convert('L'), dtype=np.uint8)
-        height, width = orig_array.shape
-        vis = np.stack([orig_array, orig_array, orig_array], axis=2).astype(np.float64)
-        roni_mask = LSBHandler._get_roni_mask_border(height, width, border_ratio)
-        roni_rows, roni_cols = np.where(roni_mask)
-        all_roni_idx = np.where(roni_mask.ravel())[0]
-        used_count = min(n_bits_embedded, all_roni_idx.size)
-        if used_count <= 0:
-            return Image.fromarray(vis.astype(np.uint8), mode='RGB')
-        active_idx = all_roni_idx[:used_count]
-        rows_active = active_idx // width
-        cols_active = active_idx % width
-        changed_mask = orig_array.ravel()[active_idx] != stego_array.ravel()[active_idx]
-        changed_rows = rows_active[changed_mask]
-        changed_cols = cols_active[changed_mask]
-        unchanged_rows = rows_active[~changed_mask]
-        unchanged_cols = cols_active[~changed_mask]
-        r, g, b = highlight_color
-        a = highlight_alpha
-        if roni_rows.size > 0:
-            vis[roni_rows, roni_cols, 0] = np.clip(vis[roni_rows, roni_cols, 0] * 0.7 + 100, 0, 255)
-            vis[roni_rows, roni_cols, 1] = np.clip(vis[roni_rows, roni_cols, 1] * 0.7 + 100, 0, 255)
-            vis[roni_rows, roni_cols, 2] = np.clip(vis[roni_rows, roni_cols, 2] * 0.7 + 255, 0, 255)
-        if unchanged_rows.size > 0:
-            vis[unchanged_rows, unchanged_cols, 0] = np.clip(vis[unchanged_rows, unchanged_cols, 0] * (1 - a * 0.4) + 255 * a * 0.4, 0, 255)
-            vis[unchanged_rows, unchanged_cols, 1] = np.clip(vis[unchanged_rows, unchanged_cols, 1] * (1 - a * 0.4) + 165 * a * 0.4, 0, 255)
-            vis[unchanged_rows, unchanged_cols, 2] = np.clip(vis[unchanged_rows, unchanged_cols, 2] * (1 - a * 0.4), 0, 255)
-        if changed_rows.size > 0:
-            vis[changed_rows, changed_cols, 0] = np.clip(vis[changed_rows, changed_cols, 0] * (1 - a) + r * a, 0, 255)
-            vis[changed_rows, changed_cols, 1] = np.clip(vis[changed_rows, changed_cols, 1] * (1 - a) + g * a, 0, 255)
-            vis[changed_rows, changed_cols, 2] = np.clip(vis[changed_rows, changed_cols, 2] * (1 - a) + b * a, 0, 255)
-        return Image.fromarray(vis.astype(np.uint8), mode='RGB')
-
-    @staticmethod
-    def generate_lsb_visualization_rgb_geometric(
-        orig_img: Image.Image, stego_img: Image.Image, n_bits_embedded: int,
-        border_ratio: float = 0.12, highlight_color: tuple = (255, 0, 0), highlight_alpha: float = 0.6
-    ) -> Image.Image:
-        orig_array = np.array(orig_img.convert('RGB'), dtype=np.uint8)
-        stego_array = np.array(stego_img.convert('RGB'), dtype=np.uint8)
-        height, width, _ = orig_array.shape
-        vis = orig_array.copy().astype(np.float64)
-        roni_mask = LSBHandler._get_roni_mask_border(height, width, border_ratio)
-        roni_rows, roni_cols = np.where(roni_mask)
-        roni_idx = LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio)
-        total_bits_affected = min(n_bits_embedded, roni_idx.size)
-        if total_bits_affected <= 0:
-            return Image.fromarray(vis.astype(np.uint8), mode='RGB')
-        affected_flat_indices = roni_idx[:total_bits_affected]
-        pixel_indices = np.unique(affected_flat_indices // 3)
-        row_indices = pixel_indices // width
-        col_indices = pixel_indices % width
-        orig_flat = orig_array.reshape(-1, 3)
-        stego_flat = stego_array.reshape(-1, 3)
-        changed_mask = np.any(orig_flat[pixel_indices] != stego_flat[pixel_indices], axis=1)
-        changed_rows = row_indices[changed_mask]
-        changed_cols = col_indices[changed_mask]
-        unchanged_rows = row_indices[~changed_mask]
-        unchanged_cols = col_indices[~changed_mask]
-        r, g, b = highlight_color
-        a = highlight_alpha
-        if roni_rows.size > 0:
-            vis[roni_rows, roni_cols, 0] = np.clip(vis[roni_rows, roni_cols, 0] * 0.7 + 100, 0, 255)
-            vis[roni_rows, roni_cols, 1] = np.clip(vis[roni_rows, roni_cols, 1] * 0.7 + 100, 0, 255)
-            vis[roni_rows, roni_cols, 2] = np.clip(vis[roni_rows, roni_cols, 2] * 0.7 + 255, 0, 255)
-        if unchanged_rows.size > 0:
-            vis[unchanged_rows, unchanged_cols, 0] = np.clip(vis[unchanged_rows, unchanged_cols, 0] * (1 - a * 0.4) + 255 * a * 0.4, 0, 255)
-            vis[unchanged_rows, unchanged_cols, 1] = np.clip(vis[unchanged_rows, unchanged_cols, 1] * (1 - a * 0.4) + 165 * a * 0.4, 0, 255)
-            vis[unchanged_rows, unchanged_cols, 2] = np.clip(vis[unchanged_rows, unchanged_cols, 2] * (1 - a * 0.4), 0, 255)
-        if changed_rows.size > 0:
-            vis[changed_rows, changed_cols, 0] = np.clip(vis[changed_rows, changed_cols, 0] * (1 - a) + r * a, 0, 255)
-            vis[changed_rows, changed_cols, 1] = np.clip(vis[changed_rows, changed_cols, 1] * (1 - a) + g * a, 0, 255)
-            vis[changed_rows, changed_cols, 2] = np.clip(vis[changed_rows, changed_cols, 2] * (1 - a) + b * a, 0, 255)
-        return Image.fromarray(vis.astype(np.uint8), mode='RGB')
