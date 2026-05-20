@@ -12,8 +12,10 @@ from PIL import Image
 import io
 import unicodedata
 from typing import Optional, Tuple
-import csv
 from datetime import datetime
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 router = APIRouter(prefix="/medical", tags=["Medical"])
 
@@ -29,104 +31,213 @@ DIR_CSV = os.path.join("files", "csv")
 for d in [DIR_ORIGINAL, DIR_EMBEDDING, DIR_EXTRACT, DIR_VISUAL, DIR_CSV]:
     os.makedirs(d, exist_ok=True)
 
-# CSV file path untuk menyimpan data waktu per layer (untuk keperluan skripsi)
-TIMING_CSV_PATH = os.path.join(DIR_CSV, "timing_per_layer.csv")
+# Path file dokumentasi Excel
+DOCUMENTATION_XLSX_PATH = os.path.join(DIR_CSV, "documentation.xlsx")
 
 MRI_BORDER_RATIO = 0.15
 PHOTO_BORDER_RATIO = 0.05
 
 # ─────────────────────────────────────────────
-# CSV TIMING HELPER
+# DOCUMENTATION XLSX HELPER
 # ─────────────────────────────────────────────
 
-def _init_timing_csv():
-    """Buat file CSV dengan header jika belum ada."""
-    if not os.path.exists(TIMING_CSV_PATH):
-        with open(TIMING_CSV_PATH, "w", newline='', encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "timestamp",
-                "record_id",
-                "patient_id",
-                "mri_resolution",
-                "photo_resolution",
-                "txt_size_kb",
-                # Embedding
-                "embed_layer1_seconds",
-                "embed_layer2_seconds",
-                "embed_total_seconds",
-                # Extraction
-                "extract_layer1_seconds",
-                "extract_layer2_seconds",
-                "extract_total_seconds",
-            ])
+_HEADER_FILL   = PatternFill("solid", start_color="2F5496")   # biru tua
+_HEADER_FONT   = Font(name="Arial", bold=True, color="FFFFFF", size=10)
+_DATA_FONT     = Font(name="Arial", size=10)
+_CENTER        = Alignment(horizontal="center", vertical="center")
+_THIN          = Side(style="thin", color="BFBFBF")
+_BORDER        = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+
+# Indeks kolom sheet Layer 1 & Layer 2 (1-based)
+_LAYER_HEADERS = [
+    "timestamp", "record_id", "patient_id",
+    # embedding
+    "embed_mse", "embed_psnr", "embed_ssim",
+    "embed_brisque", "embed_niqe", "embed_piqe",
+    # extraction
+    "extract_mse", "extract_psnr", "extract_ssim",
+    "extract_brisque", "extract_niqe", "extract_piqe",
+]
+
+# Indeks kolom sheet Timing (1-based)
+_TIMING_HEADERS = [
+    "timestamp", "record_id", "patient_id",
+    "mri_resolution", "photo_resolution", "txt_size_kb",
+    "embed_layer1_seconds", "embed_layer2_seconds", "embed_total_seconds",
+    "extract_layer1_seconds", "extract_layer2_seconds", "extract_total_seconds",
+]
 
 
-def _write_embed_timing(
+def _safe_float(value) -> Optional[float]:
+    """Konversi ke float dengan 6 desimal agar tidak terjadi bug koma."""
+    if value is None:
+        return None
+    try:
+        return round(float(value), 6)
+    except (TypeError, ValueError):
+        return None
+
+
+def _init_documentation_xlsx():
+    """Buat file documentation.xlsx dengan 3 sheet + header jika belum ada."""
+    if os.path.exists(DOCUMENTATION_XLSX_PATH):
+        return
+
+    wb = Workbook()
+
+    # ── Sheet 1: Layer 1 ──
+    ws1 = wb.active
+    ws1.title = "Layer 1"
+    ws1.append(_LAYER_HEADERS)
+    _style_header_row(ws1, len(_LAYER_HEADERS))
+
+    # ── Sheet 2: Layer 2 ──
+    ws2 = wb.create_sheet("Layer 2")
+    ws2.append(_LAYER_HEADERS)
+    _style_header_row(ws2, len(_LAYER_HEADERS))
+
+    # ── Sheet 3: Timing ──
+    ws3 = wb.create_sheet("Timing")
+    ws3.append(_TIMING_HEADERS)
+    _style_header_row(ws3, len(_TIMING_HEADERS))
+
+    wb.save(DOCUMENTATION_XLSX_PATH)
+
+
+def _style_header_row(ws, col_count: int):
+    for col in range(1, col_count + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = _HEADER_FONT
+        cell.fill = _HEADER_FILL
+        cell.alignment = _CENTER
+        cell.border = _BORDER
+        ws.column_dimensions[get_column_letter(col)].width = 20
+    ws.row_dimensions[1].height = 20
+    ws.freeze_panes = "A2"
+
+
+def _style_data_row(ws, row: int, col_count: int):
+    alt_fill = PatternFill("solid", start_color="EEF2F9") if row % 2 == 0 else None
+    for col in range(1, col_count + 1):
+        cell = ws.cell(row=row, column=col)
+        cell.font = _DATA_FONT
+        cell.border = _BORDER
+        cell.alignment = _CENTER
+        if alt_fill:
+            cell.fill = alt_fill
+
+
+def _append_layer_row(ws, ts: str, record_id: int, patient_id: int,
+                      embed_metrics: dict, extract_metrics: Optional[dict]):
+    """Tambah satu baris ke sheet Layer 1 atau Layer 2."""
+    row_data = [
+        ts, record_id, patient_id,
+        _safe_float(embed_metrics.get("mse")),
+        _safe_float(embed_metrics.get("psnr")),
+        _safe_float(embed_metrics.get("ssim")),
+        _safe_float(embed_metrics.get("brisque")),
+        _safe_float(embed_metrics.get("niqe")),
+        _safe_float(embed_metrics.get("piqe")),
+        _safe_float(extract_metrics.get("mse"))      if extract_metrics else None,
+        _safe_float(extract_metrics.get("psnr"))     if extract_metrics else None,
+        _safe_float(extract_metrics.get("ssim"))     if extract_metrics else None,
+        _safe_float(extract_metrics.get("brisque"))  if extract_metrics else None,
+        _safe_float(extract_metrics.get("niqe"))     if extract_metrics else None,
+        _safe_float(extract_metrics.get("piqe"))     if extract_metrics else None,
+    ]
+    ws.append(row_data)
+    _style_data_row(ws, ws.max_row, len(_LAYER_HEADERS))
+
+
+def _write_embed_to_xlsx(
     record_id: int,
     patient_id: int,
     mri_resolution: str,
     photo_resolution: str,
     txt_size_kb: float,
-    embed_layer1: float,
-    embed_layer2: float,
-    embed_total: float,
+    embed_layer1_seconds: float,
+    embed_layer2_seconds: float,
+    embed_total_seconds: float,
+    metrics_l1_embed: dict,
+    metrics_l2_embed: dict,
 ):
-    """Tulis data waktu embedding ke CSV. Kolom ekstraksi dikosongkan dulu."""
-    _init_timing_csv()
-    with open(TIMING_CSV_PATH, "a", newline='', encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            record_id,
-            patient_id,
-            mri_resolution,
-            photo_resolution,
-            txt_size_kb,
-            embed_layer1,
-            embed_layer2,
-            embed_total,
-            "",   # extract_layer1_seconds (diisi saat ekstraksi)
-            "",   # extract_layer2_seconds
-            "",   # extract_total_seconds
-        ])
+    """Tulis data embedding ke documentation.xlsx (Sheet Layer 1, Layer 2, Timing)."""
+    _init_documentation_xlsx()
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    wb = load_workbook(DOCUMENTATION_XLSX_PATH)
+    ws1 = wb["Layer 1"]
+    ws2 = wb["Layer 2"]
+    ws3 = wb["Timing"]
+
+    _append_layer_row(ws1, ts, record_id, patient_id, metrics_l1_embed, None)
+    _append_layer_row(ws2, ts, record_id, patient_id, metrics_l2_embed, None)
+
+    timing_row = [
+        ts, record_id, patient_id,
+        mri_resolution, photo_resolution, _safe_float(txt_size_kb),
+        _safe_float(embed_layer1_seconds),
+        _safe_float(embed_layer2_seconds),
+        _safe_float(embed_total_seconds),
+        None, None, None,   # extract columns — diisi saat ekstraksi
+    ]
+    ws3.append(timing_row)
+    _style_data_row(ws3, ws3.max_row, len(_TIMING_HEADERS))
+
+    wb.save(DOCUMENTATION_XLSX_PATH)
 
 
-def _update_extract_timing(
+def _update_extract_to_xlsx(
     record_id: int,
-    extract_layer1: float,
-    extract_layer2: float,
-    extract_total: float,
+    extract_layer1_seconds: float,
+    extract_layer2_seconds: float,
+    extract_total_seconds: float,
+    metrics_l1_extract: dict,
+    metrics_l2_extract: dict,
 ):
-    """Update baris yang sudah ada (berdasarkan record_id) dengan data waktu ekstraksi."""
-    _init_timing_csv()
+    """Update baris yang ada (berdasarkan record_id) dengan data ekstraksi."""
+    _init_documentation_xlsx()
 
-    rows = []
-    updated = False
+    wb = load_workbook(DOCUMENTATION_XLSX_PATH)
+    ws1 = wb["Layer 1"]
+    ws2 = wb["Layer 2"]
+    ws3 = wb["Timing"]
 
-    with open(TIMING_CSV_PATH, "r", newline='', encoding="utf-8") as f:
-        reader = csv.reader(f)
-        header = next(reader)
-        rows.append(header)
-        for row in reader:
-            # Cari baris dengan record_id yang cocok dan kolom ekstraksi masih kosong
-            if (len(row) >= 12
-                    and str(row[1]) == str(record_id)
-                    and row[9] == ""):
-                row[9]  = str(extract_layer1)
-                row[10] = str(extract_layer2)
-                row[11] = str(extract_total)
-                updated = True
-            rows.append(row)
+    # ── Update Sheet Timing ──
+    for row in ws3.iter_rows(min_row=2):
+        if str(row[1].value) == str(record_id) and row[9].value is None:
+            row[9].value  = _safe_float(extract_layer1_seconds)
+            row[10].value = _safe_float(extract_layer2_seconds)
+            row[11].value = _safe_float(extract_total_seconds)
+            break
 
-    if updated:
-        with open(TIMING_CSV_PATH, "w", newline='', encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerows(rows)
+    # ── Update Sheet Layer 1 (kolom extract) ──
+    for row in ws1.iter_rows(min_row=2):
+        if str(row[1].value) == str(record_id) and row[9].value is None:
+            row[9].value  = _safe_float(metrics_l1_extract.get("mse"))
+            row[10].value = _safe_float(metrics_l1_extract.get("psnr"))
+            row[11].value = _safe_float(metrics_l1_extract.get("ssim"))
+            row[12].value = _safe_float(metrics_l1_extract.get("brisque"))
+            row[13].value = _safe_float(metrics_l1_extract.get("niqe"))
+            row[14].value = _safe_float(metrics_l1_extract.get("piqe"))
+            break
+
+    # ── Update Sheet Layer 2 (kolom extract) ──
+    for row in ws2.iter_rows(min_row=2):
+        if str(row[1].value) == str(record_id) and row[9].value is None:
+            row[9].value  = _safe_float(metrics_l2_extract.get("mse"))
+            row[10].value = _safe_float(metrics_l2_extract.get("psnr"))
+            row[11].value = _safe_float(metrics_l2_extract.get("ssim"))
+            row[12].value = _safe_float(metrics_l2_extract.get("brisque"))
+            row[13].value = _safe_float(metrics_l2_extract.get("niqe"))
+            row[14].value = _safe_float(metrics_l2_extract.get("piqe"))
+            break
+
+    wb.save(DOCUMENTATION_XLSX_PATH)
 
 
 # ─────────────────────────────────────────────
-# HELPER FUNCTIONS (tidak diubah)
+# HELPER FUNCTIONS
 # ─────────────────────────────────────────────
 
 def normalize_text(text: str) -> str:
@@ -330,8 +441,6 @@ async def upload_medical_data(
     img_photo_rgb = img_photo.convert('RGB')
 
     try:
-        t_total = time.time()
-
         img_photo_rgb.save(orig_photo_path, format='PNG', compress_level=9)
         img_mri_gray.save(orig_mri_path, format='PNG', compress_level=0)
 
@@ -347,10 +456,10 @@ async def upload_medical_data(
         if len(data_to_embed) > roni_mri_bytes:
             raise HTTPException(status_code=400, detail=f"Data terlalu besar. Kapasitas RONI MRI: {roni_mri_bytes} bytes.")
 
-        # ── Layer 1 Embedding ──
-        t1 = time.time()
+        # ── Layer 1 Embedding (waktu murni, tanpa metrik) ──
+        t1_start = time.perf_counter()
         mri_stego_img = LSBHandler.embed_to_grayscale_geometric(img_mri_gray, data_to_embed, border_ratio=MRI_BORDER_RATIO)
-        time_layer1 = round(time.time() - t1, 4)
+        time_layer1 = round(time.perf_counter() - t1_start, 6)
 
         mri_stego_size = _estimate_png_size(mri_stego_img)
 
@@ -362,19 +471,21 @@ async def upload_medical_data(
             if actual_size > roni_photo_bytes:
                 raise HTTPException(status_code=400, detail=f"MRI stego terlalu besar. Kapasitas RONI foto: {roni_photo_bytes} bytes.")
 
-        # ── Layer 2 Embedding ──
-        t2 = time.time()
+        # ── Layer 2 Embedding (waktu murni, tanpa metrik) ──
+        t2_start = time.perf_counter()
         stego_img = LSBHandler.embed_to_rgb_geometric(img_photo_rgb, mri_stego_img, border_ratio=PHOTO_BORDER_RATIO)
-        time_layer2 = round(time.time() - t2, 4)
+        time_layer2 = round(time.perf_counter() - t2_start, 6)
+
+        # Waktu total embedding = Layer 1 + Layer 2 (murni, tanpa simpan file & metrik)
+        time_embed_total = round(time_layer1 + time_layer2, 6)
 
         stego_img.save(stego_out_path, format='PNG', compress_level=9)
 
+        # ── Kalkulasi metrik (terpisah, tidak masuk hitungan waktu) ──
         metrics_l1 = LSBHandler.calculate_metrics(img_mri_gray, mri_stego_img, mode='L')
         metrics_l2 = LSBHandler.calculate_metrics(img_photo_rgb, stego_img, mode='RGB')
         nriqa_l1 = LSBHandler.calculate_nriqa_metrics(mri_stego_img, mode='L')
         nriqa_l2 = LSBHandler.calculate_nriqa_metrics(stego_img, mode='RGB')
-
-        time_total = round(time.time() - t_total, 4)
 
         file_sizes = {
             "original_txt_kb": _file_size_kb(orig_txt_path),
@@ -383,14 +494,14 @@ async def upload_medical_data(
             "stego_kb": _file_size_kb(stego_out_path),
         }
 
-        # ── Simpan ke database (tidak diubah) ──
+        # ── Simpan ke database ──
         db_record = MedicalRecord(
             patient_id=patient_id,
             medical_data_path=_normalize_path(orig_txt_path),
             photo_path=_normalize_path(orig_photo_path),
             mri_path=_normalize_path(orig_mri_path),
             stego_photo_path=_normalize_path(stego_out_path),
-            embed_time_seconds=time_total,
+            embed_time_seconds=time_embed_total,
         )
         db.add(db_record)
         db.commit()
@@ -413,16 +524,18 @@ async def upload_medical_data(
         ))
         db.commit()
 
-        # ── Tulis timing per layer ke CSV (untuk skripsi) ──
-        _write_embed_timing(
+        # ── Tulis ke documentation.xlsx ──
+        _write_embed_to_xlsx(
             record_id=db_record.record_id,
             patient_id=patient_id,
             mri_resolution=f"{mri_w}x{mri_h}",
             photo_resolution=f"{photo_w}x{photo_h}",
             txt_size_kb=file_sizes["original_txt_kb"],
-            embed_layer1=time_layer1,
-            embed_layer2=time_layer2,
-            embed_total=time_total,
+            embed_layer1_seconds=time_layer1,
+            embed_layer2_seconds=time_layer2,
+            embed_total_seconds=time_embed_total,
+            metrics_l1_embed={**metrics_l1, **nriqa_l1},
+            metrics_l2_embed={**metrics_l2, **nriqa_l2},
         )
 
         write_log(db, current_user.user_id, f"UPLOAD_MEDICAL: patient_id={patient_id}, record_id={db_record.record_id}")
@@ -435,7 +548,7 @@ async def upload_medical_data(
             "embed_time": {
                 "layer1_seconds": time_layer1,
                 "layer2_seconds": time_layer2,
-                "total_seconds": time_total,
+                "total_seconds": time_embed_total,
             },
             "quality_metrics": {
                 "layer1_mri_stego": {**metrics_l1, **nriqa_l1},
@@ -540,25 +653,26 @@ async def extract_medical_data(
     _safe_delete(ext_mri_path, ext_photo_path, ext_txt_path)
 
     try:
-        t_start = time.time()
-
         stego_img = Image.open(stego_path).convert('RGB')
 
-        # ── Layer 2 Extraction ──
-        t_ext2 = time.time()
+        # ── Layer 2 Extraction (waktu murni) ──
+        t2_start = time.perf_counter()
         extracted_mri_img = LSBHandler.extract_from_rgb_geometric(stego_img, border_ratio=PHOTO_BORDER_RATIO)
-        time_extract_layer2 = round(time.time() - t_ext2, 4)
+        time_extract_layer2 = round(time.perf_counter() - t2_start, 6)
 
         if extracted_mri_img is None:
             raise HTTPException(status_code=500, detail="Gagal mengekstrak MRI dari stego")
 
-        # ── Layer 1 Extraction ──
-        t_ext1 = time.time()
+        # ── Layer 1 Extraction (waktu murni) ──
+        t1_start = time.perf_counter()
         extracted_bytes = LSBHandler.extract_from_grayscale_geometric(extracted_mri_img, border_ratio=MRI_BORDER_RATIO)
-        time_extract_layer1 = round(time.time() - t_ext1, 4)
+        time_extract_layer1 = round(time.perf_counter() - t1_start, 6)
 
         if not extracted_bytes:
             raise HTTPException(status_code=500, detail="Gagal menemukan data tersembunyi")
+
+        # Waktu total extraction = Layer 1 + Layer 2 (murni)
+        time_extract_total = round(time_extract_layer1 + time_extract_layer2, 6)
 
         raw = extracted_bytes.decode("utf-8")
         ciphertext, iv, mac = _unpack_encrypted(raw)
@@ -575,14 +689,13 @@ async def extract_medical_data(
         cleaned_photo_img = Image.fromarray(cleaned_photo_array, mode='RGB')
         _save_image(cleaned_photo_img, ext_photo_path, compress_level=9)
 
-        extract_time = round(time.time() - t_start, 4)
-
         acctxt_result = {"acc_txt": None, "D": None, "T": None, "bit_errors": None}
         if orig_txt_path and os.path.exists(orig_txt_path):
             with open(orig_txt_path, "r", encoding="utf-8", newline='') as f:
                 original_text = f.read()
             acctxt_result = _calculate_acctxt(original_text, decrypted)
 
+        # ── Kalkulasi metrik (terpisah, tidak masuk hitungan waktu) ──
         metrics_l1 = {"mse": 0.0, "psnr": 100.0, "ssim": 1.0}
         if orig_mri_path and os.path.exists(orig_mri_path):
             orig_mri_img = Image.open(orig_mri_path)
@@ -600,15 +713,17 @@ async def extract_medical_data(
         nriqa_l1 = LSBHandler.calculate_nriqa_metrics(extracted_mri_img, mode='L')
         nriqa_l2 = LSBHandler.calculate_nriqa_metrics(cleaned_photo_img, mode='RGB')
 
-        record.extract_time_seconds = extract_time
+        record.extract_time_seconds = time_extract_total
         db.commit()
 
-        # ── Update timing CSV dengan data ekstraksi (untuk skripsi) ──
-        _update_extract_timing(
+        # ── Update documentation.xlsx dengan data ekstraksi ──
+        _update_extract_to_xlsx(
             record_id=record_id,
-            extract_layer1=time_extract_layer1,
-            extract_layer2=time_extract_layer2,
-            extract_total=extract_time,
+            extract_layer1_seconds=time_extract_layer1,
+            extract_layer2_seconds=time_extract_layer2,
+            extract_total_seconds=time_extract_total,
+            metrics_l1_extract={**metrics_l1, **nriqa_l1},
+            metrics_l2_extract={**metrics_l2, **nriqa_l2},
         )
 
         all_metrics = db.query(ImageQualityMetric).filter(ImageQualityMetric.record_id == record_id).order_by(ImageQualityMetric.metric_id.asc()).all()
@@ -659,11 +774,11 @@ async def extract_medical_data(
             "patient_id": record.patient_id,
             "patient_name": patient.full_name if patient else "Unknown",
             "medical_data": decrypted,
-            "extract_time_seconds": extract_time,
+            "extract_time_seconds": time_extract_total,
             "extract_time_per_layer": {
                 "layer1_seconds": time_extract_layer1,
                 "layer2_seconds": time_extract_layer2,
-                "total_seconds": extract_time,
+                "total_seconds": time_extract_total,
             },
             "stego_image": record.stego_photo_path,
             "photo_path": _normalize_path(ext_photo_path),
