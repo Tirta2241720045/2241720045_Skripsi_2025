@@ -39,17 +39,6 @@ class LSBHandler:
         return np.flatnonzero(mask).astype(np.int64)
 
     @staticmethod
-    def _get_roni_indices_rgb_border(height: int, width: int, border_ratio: float = 0.15) -> np.ndarray:
-        mask = LSBHandler._get_roni_mask_border(height, width, border_ratio)
-        pixel_indices = np.flatnonzero(mask).astype(np.int64)
-        roni_flat = np.empty(pixel_indices.size * 3, dtype=np.int64)
-        base = pixel_indices * 3
-        roni_flat[0::3] = base
-        roni_flat[1::3] = base + 1
-        roni_flat[2::3] = base + 2
-        return roni_flat
-
-    @staticmethod
     def get_roni_capacity_border(height: int, width: int, border_ratio: float = 0.15) -> int:
         return int(LSBHandler._get_roni_indices_border(height, width, border_ratio).size)
 
@@ -71,7 +60,7 @@ class LSBHandler:
         return np.packbits(bits_source[32:total_bits]).tobytes()[:data_length]
 
     @staticmethod
-    def embed_to_grayscale_geometric(img: Image.Image, data_bytes: bytes, border_ratio: float = 0.12) -> Image.Image:
+    def embed_to_grayscale_geometric(img: Image.Image, data_bytes: bytes, border_ratio: float = 0.15) -> Image.Image:
         img_array = np.array(img.convert('L'), dtype=np.uint8)
         height, width = img_array.shape
         flat = img_array.ravel()
@@ -84,23 +73,7 @@ class LSBHandler:
         return Image.fromarray(flat.reshape(height, width), mode='L')
 
     @staticmethod
-    def embed_to_rgb_geometric(cover_img: Image.Image, secret_img: Image.Image, border_ratio: float = 0.12) -> Image.Image:
-        cover_array = np.array(cover_img.convert('RGB'), dtype=np.uint8)
-        height, width, _ = cover_array.shape
-        buf = io.BytesIO()
-        secret_img.save(buf, format='PNG', compress_level=1)
-        secret_bytes = buf.getvalue()
-        bits, n_bits = LSBHandler._pack_data(secret_bytes)
-        roni_idx = _shuffled_indices(LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio))
-        if n_bits > roni_idx.size:
-            raise ValueError(f"Data terlalu besar. Kapasitas: {roni_idx.size} bits, Data: {n_bits} bits.")
-        target_idx = roni_idx[:n_bits]
-        flat = cover_array.ravel()
-        flat[target_idx] = (flat[target_idx] & np.uint8(0xFE)) | bits.astype(np.uint8)
-        return Image.fromarray(cover_array, mode='RGB')
-
-    @staticmethod
-    def extract_from_grayscale_geometric(img: Image.Image, border_ratio: float = 0.12) -> bytes | None:
+    def extract_from_grayscale_geometric(img: Image.Image, border_ratio: float = 0.15) -> bytes | None:
         img_array = np.array(img.convert('L'), dtype=np.uint8)
         height, width = img_array.shape
         flat = img_array.ravel()
@@ -111,23 +84,34 @@ class LSBHandler:
         return LSBHandler._unpack_data(bits_source)
 
     @staticmethod
-    def extract_from_rgb_geometric(stego_img: Image.Image, border_ratio: float = 0.12) -> Image.Image | None:
+    def embed_to_rgb_full(cover_img: Image.Image, secret_img: Image.Image) -> Image.Image:
+        cover_array = np.array(cover_img.convert('RGB'), dtype=np.uint8)
+        height, width, _ = cover_array.shape
+        buf = io.BytesIO()
+        secret_img.save(buf, format='PNG', compress_level=1)
+        secret_bytes = buf.getvalue()
+        bits, n_bits = LSBHandler._pack_data(secret_bytes)
+        total_capacity = height * width * 3
+        if n_bits > total_capacity:
+            raise ValueError(f"Data terlalu besar. Kapasitas: {total_capacity} bits, Data: {n_bits} bits.")
+        flat = cover_array.ravel()
+        flat[:n_bits] = (flat[:n_bits] & np.uint8(0xFE)) | bits.astype(np.uint8)
+        return Image.fromarray(cover_array, mode='RGB')
+
+    @staticmethod
+    def extract_from_rgb_full(stego_img: Image.Image) -> Image.Image | None:
         img_array = np.array(stego_img.convert('RGB'), dtype=np.uint8)
-        height, width, _ = img_array.shape
         flat = img_array.ravel()
-        roni_idx = _shuffled_indices(LSBHandler._get_roni_indices_rgb_border(height, width, border_ratio))
-        if roni_idx.size < 32:
+        if flat.size < 32:
             return None
-        bits_source = (flat[roni_idx] & 1).astype(np.uint8)
+        bits_source = (flat & 1).astype(np.uint8)
         data_bytes = LSBHandler._unpack_data(bits_source)
         if data_bytes is None:
             return None
         return Image.open(io.BytesIO(data_bytes))
 
     @staticmethod
-    def calculate_metrics(
-        orig_img: Image.Image, stego_img: Image.Image, mode: str = 'L'
-    ) -> dict:
+    def calculate_metrics(orig_img: Image.Image, stego_img: Image.Image, mode: str = 'L') -> dict:
         orig = np.array(orig_img.convert(mode), dtype=np.float64)
         steg = np.array(stego_img.convert(mode), dtype=np.float64)
         if orig.shape != steg.shape:
@@ -137,7 +121,7 @@ class LSBHandler:
                 ),
                 dtype=np.float64,
             )
-        mse  = float(np.mean((orig - steg) ** 2))
+        mse = float(np.mean((orig - steg) ** 2))
         psnr = 100.0 if mse == 0 else min(10 * math.log10(255.0 ** 2 / mse), 100.0)
         try:
             if mode == 'RGB':
@@ -150,7 +134,7 @@ class LSBHandler:
         except Exception:
             ssim_val = 1.0
         return {
-            'mse':  round(max(0.0, mse),  6),
+            'mse': round(max(0.0, mse), 6),
             'psnr': round(max(0.0, psnr), 4),
             'ssim': round(max(0.0, min(ssim_val, 1.0)), 6),
         }
@@ -163,8 +147,8 @@ class LSBHandler:
             tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0)
             for name, kwargs in [
                 ('brisque', {'test_y_channel': True}),
-                ('niqe',    {'test_y_channel': True}),
-                ('piqe',    {}),
+                ('niqe', {'test_y_channel': True}),
+                ('piqe', {}),
             ]:
                 try:
                     score = round(_get_metric(name, **kwargs)(tensor).item(), 4)
@@ -191,7 +175,7 @@ class LSBHandler:
         n = a.size
         s2_a = float(np.dot(a_c.ravel(), a_c.ravel())) / n
         s2_b = float(np.dot(b_c.ravel(), b_c.ravel())) / n
-        cov  = float(np.dot(a_c.ravel(), b_c.ravel())) / n
+        cov = float(np.dot(a_c.ravel(), b_c.ravel())) / n
         num = (2.0 * mu_a * mu_b + C1) * (2.0 * cov + C2)
         den = (mu_a ** 2 + mu_b ** 2 + C1) * (s2_a + s2_b + C2)
         return 1.0 if den == 0 else float(num / den)
