@@ -7,7 +7,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
-    libgl1-mesa-glx \
+    libgl1 \
     libxcb-xinerama0 \
     libxcb-shm0 \
     libxcb-xfixes0 \
