@@ -8,18 +8,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libgl1 \
-    libxcb-xinerama0 \
-    libxcb-shm0 \
-    libxcb-xfixes0 \
-    libxcb-shape0 \
-    libxcb-randr0 \
-    libxcb-render0 \
-    libxcb-xkb1 \
-    libxcb-icccm4 \
-    libxcb-image0 \
-    libxcb-keysyms1 \
-    libxcb-util1 \
-    libxcb-xv0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
