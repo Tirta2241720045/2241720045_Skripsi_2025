@@ -31,10 +31,11 @@ const Navbar: React.FC<NavbarProps> = ({ userFullName = '', userRole = '' }) => 
   };
 
   const getRoleIcon = (role: string) => {
+    const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
     switch (role) {
-      case 'admin':  return 'http://localhost:8000/static/admin.png';
-      case 'doctor': return 'http://localhost:8000/static/dokter.png';
-      case 'staff':  return 'http://localhost:8000/static/staff.png';
+      case 'admin':  return `${baseUrl}/static/admin.png`;
+      case 'doctor': return `${baseUrl}/static/dokter.png`;
+      case 'staff':  return `${baseUrl}/static/staff.png`;
       default:       return '';
     }
   };
@@ -66,7 +67,7 @@ const Navbar: React.FC<NavbarProps> = ({ userFullName = '', userRole = '' }) => 
         >
           <div className="stegoshield-navbar-brand-icon">
             <img
-              src="http://localhost:8000/static/logo.png"
+              src={`${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/static/logo.png`}
               alt="StegoShield Logo"
               className="stegoshield-navbar-brand-logo"
               onError={(e) => {
@@ -93,7 +94,7 @@ const Navbar: React.FC<NavbarProps> = ({ userFullName = '', userRole = '' }) => 
         <div className="stegoshield-navbar-datetime-wrapper">
           <div className="stegoshield-navbar-flag-wrapper">
             <img
-              src="http://localhost:8000/static/flag.png"
+              src={`${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/static/flag.png`}
               alt="Indonesian Flag"
               className="stegoshield-navbar-flag-image"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}

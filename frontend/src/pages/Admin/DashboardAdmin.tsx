@@ -505,14 +505,15 @@ const DashboardAdmin = () => {
   const currentChart = CHARTS[chartIndex];
 
   const getRoleIconUrl = (role: string) => {
+    const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
     switch (role) {
-      case 'admin': return 'http://localhost:8000/static/admin.png';
-      case 'doctor': return 'http://localhost:8000/static/dokter.png';
-      case 'staff': return 'http://localhost:8000/static/staff.png';
+      case 'admin': return `${baseUrl}/static/admin.png`;
+      case 'doctor': return `${baseUrl}/static/dokter.png`;
+      case 'staff': return `${baseUrl}/static/staff.png`;
       default: return '';
     }
   };
-
+  
   const getRoleAccent = (role: string) => {
     switch (role) {
       case 'admin': return { bg: 'var(--role-admin-bg)', border: 'var(--role-admin-border)', badge: 'var(--role-admin-badge)', label: 'Administrator', icon: '🔐' };

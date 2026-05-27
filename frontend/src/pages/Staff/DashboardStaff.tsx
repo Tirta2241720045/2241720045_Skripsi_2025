@@ -16,7 +16,7 @@ interface FileValidation {
   size: number; isGrayscale?: boolean; lineCount?: number; charCount?: number;
 }
 
-const BASE_URL = 'http://localhost:8000';
+const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const DEFAULT_PROCESS_STEPS: ProcessStep[] = [
   { id: 'encrypt', label: 'Encrypt Data', sublabel: 'AES-128 CBC', icon: '🔐', status: 'pending' },

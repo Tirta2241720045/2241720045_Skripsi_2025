@@ -8,7 +8,7 @@ import { downloadStegoReport, downloadExtractReport } from '../../components/sha
 type PipelineStatus = 'idle' | 'running' | 'done' | 'error';
 interface PipelineStep { id: string; label: string; sublabel: string; icon: string; status: 'pending' | 'active' | 'done'; }
 
-const BASE_URL = 'http://localhost:8000';
+const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 const toUrl = (p: string) => p ? `${BASE_URL}/${p.replace(/\\/g, '/')}` : '';
 
 const fetchTextContent = async (path: string): Promise<string> => {

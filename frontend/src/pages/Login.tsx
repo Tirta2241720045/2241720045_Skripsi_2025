@@ -53,7 +53,7 @@ const Login = () => {
         >
           <div className="stegoshield-login-logo-wrapper">
             <img
-              src="http://localhost:8000/static/logo.png"
+              src={`${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/static/logo.png`}
               alt="StegoShield Logo"
               className="stegoshield-login-logo-image"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
