@@ -1,19 +1,20 @@
-// This optional code is used to register a service worker.
-// register() is not called by default.
-
 const isLocalhost = Boolean(
   window.location.hostname === 'localhost' ||
     window.location.hostname === '[::1]' ||
-    window.location.hostname.match(/^127(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$/)
+    window.location.hostname.match(
+      /^127(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$/
+    )
 );
 
 type Config = {
   onSuccess?: (registration: ServiceWorkerRegistration) => void;
   onUpdate?: (registration: ServiceWorkerRegistration) => void;
+  onOffline?: () => void;
+  onOnline?: () => void;
 };
 
 export function register(config?: Config) {
-  if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
+  if ('serviceWorker' in navigator) {
     const publicUrl = new URL(process.env.PUBLIC_URL || '', window.location.href);
     if (publicUrl.origin !== window.location.origin) return;
 
@@ -25,6 +26,8 @@ export function register(config?: Config) {
       } else {
         registerValidSW(swUrl, config);
       }
+
+      listenConnectivity(config);
     });
   }
 }
@@ -33,25 +36,28 @@ function registerValidSW(swUrl: string, config?: Config) {
   navigator.serviceWorker
     .register(swUrl)
     .then((registration) => {
+      registration.update();
+
+      setInterval(() => {
+        registration.update();
+      }, 60 * 60 * 1000);
+
       registration.onupdatefound = () => {
         const installingWorker = registration.installing;
         if (installingWorker == null) return;
+
         installingWorker.onstatechange = () => {
           if (installingWorker.state === 'installed') {
             if (navigator.serviceWorker.controller) {
-              console.log('New content is available; please refresh.');
-              if (config && config.onUpdate) config.onUpdate(registration);
+              config?.onUpdate?.(registration);
             } else {
-              console.log('Content is cached for offline use.');
-              if (config && config.onSuccess) config.onSuccess(registration);
+              config?.onSuccess?.(registration);
             }
           }
         };
       };
     })
-    .catch((error) => {
-      console.error('Error during service worker registration:', error);
-    });
+    .catch(() => {});
 }
 
 function checkValidServiceWorker(swUrl: string, config?: Config) {
@@ -72,8 +78,13 @@ function checkValidServiceWorker(swUrl: string, config?: Config) {
       }
     })
     .catch(() => {
-      console.log('No internet connection found. App is running in offline mode.');
+      config?.onOffline?.();
     });
+}
+
+function listenConnectivity(config?: Config) {
+  window.addEventListener('online', () => config?.onOnline?.());
+  window.addEventListener('offline', () => config?.onOffline?.());
 }
 
 export function unregister() {
@@ -82,8 +93,6 @@ export function unregister() {
       .then((registration) => {
         registration.unregister();
       })
-      .catch((error) => {
-        console.error(error.message);
-      });
+      .catch(() => {});
   }
 }
