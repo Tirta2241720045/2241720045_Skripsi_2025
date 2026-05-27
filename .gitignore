@@ -8,6 +8,10 @@ __pycache__/
 .env
 *.db
 *.sqlite3
+backend/files/
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
 
 # ====================
 # ML / AI Cache
@@ -21,16 +25,16 @@ __pycache__/
 *.pickle
 
 # ====================
-# Project specific
-# ====================
-backend/files/
-
-# ====================
 # Frontend
 # ====================
 frontend/node_modules/
 frontend/build/
 frontend/.env
+frontend/coverage/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
 
 # ====================
 # IDE & OS
@@ -41,3 +45,6 @@ frontend/.env
 *.user
 .DS_Store
 Thumbs.db
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

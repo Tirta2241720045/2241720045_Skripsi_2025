@@ -42,9 +42,9 @@ const wrapEvery = (s: string, n: number): string => {
   return t.split('').reduce((acc, c, i) => acc + (i > 0 && i % n === 0 ? '\n' : '') + c, '');
 };
 
-const isError    = (a: string) => a.startsWith('ERROR|');
-const isWarning  = (a: string) => a.startsWith('WARNING|');
-const isSecurity = (a: string) => a.toUpperCase().includes('LOGIN_FAILED') || a.toUpperCase().includes('LOGIN FAILED');
+const isError    = (a: string) => a?.startsWith('ERROR|') ?? false;
+const isWarning  = (a: string) => a?.startsWith('WARNING|') ?? false;
+const isSecurity = (a: string) => (a?.toUpperCase().includes('LOGIN_FAILED') || a?.toUpperCase().includes('LOGIN FAILED')) ?? false;
 
 export const captureAllCharts = async (
   pieRef:  React.RefObject<HTMLDivElement | null>,
@@ -79,10 +79,10 @@ export const exportToPDF = async (
   const doc = new jsPDF({ unit: 'mm', format: 'a4', putOnlyUsedFonts: true });
   doc.setFont('helvetica');
 
-  const PW   = doc.internal.pageSize.getWidth();   
-  const PH   = doc.internal.pageSize.getHeight(); 
+  const PW   = doc.internal.pageSize.getWidth();
+  const PH   = doc.internal.pageSize.getHeight();
   const MG   = 14;
-  const CW   = PW - MG * 2;                       
+  const CW   = PW - MG * 2;
   const FH   = 10;
   const GAP  = 10;
   const TOP  = 22;
@@ -186,27 +186,36 @@ export const exportToPDF = async (
     }
   };
 
-  const baseLogs    = selectedUser ? allLogs.filter(l => l.user_id === selectedUser.user_id) : allLogs;
+  const baseLogs = selectedUser
+    ? allLogs.filter(l => l != null && l.user_id === selectedUser.user_id)
+    : allLogs.filter(l => l != null);
+
+  const safeAction = (a: string | null | undefined): string => a ?? '';
+
   const monthStats  = getCurrentMonthStats();
-  const monthLogs   = getCurrentMonthLogs();
-  const errorLogs   = baseLogs.filter(l => isError(l.action) || isWarning(l.action));
-  const secEvt      = baseLogs.filter(l => isSecurity(l.action));
+  const monthLogs   = getCurrentMonthLogs().filter(l => l != null);
+  const errorLogs   = baseLogs.filter(l => isError(safeAction(l.action)) || isWarning(safeAction(l.action)));
+  const secEvt      = baseLogs.filter(l => isSecurity(safeAction(l.action)));
   const failedCount = secEvt.length;
   const successRate = baseLogs.length > 0
-    ? (baseLogs.filter(l => !isError(l.action) && !isSecurity(l.action)).length / baseLogs.length) * 100
+    ? (baseLogs.filter(l => !isError(safeAction(l.action)) && !isSecurity(safeAction(l.action))).length / baseLogs.length) * 100
     : 100;
   const activeUsers = new Set(baseLogs.map(l => l.user_id)).size;
-  const total7d     = activityByDay.data.reduce((a, b) => a + b, 0);
-  const avg7d       = activityByDay.data.length ? total7d / activityByDay.data.length : 0;
-  const peak7d      = activityByDay.data.length ? Math.max(...activityByDay.data) : 0;
-  const trendVal    = activityByDay.data.length > 1 ? activityByDay.data.at(-1)! - activityByDay.data[0] : 0;
+
+  const safeData    = (activityByDay.data ?? []).map(v => v ?? 0);
+  const total7d     = safeData.reduce((a, b) => a + b, 0);
+  const avg7d       = safeData.length ? total7d / safeData.length : 0;
+  const peak7d      = safeData.length ? Math.max(...safeData) : 0;
+  const trendVal    = safeData.length > 1 ? safeData[safeData.length - 1] - safeData[0] : 0;
   const trendDir    = trendVal > 0 ? 'Increasing' : trendVal < 0 ? 'Decreasing' : 'Stable';
   const trendColor  = trendVal > 0 ? C.green : trendVal < 0 ? C.red : C.amber;
   const sysStatus   = failedCount > 5 || errorLogs.length > 10 ? 'NEEDS ATTENTION' : successRate < 80 ? 'WARNING' : 'HEALTHY';
   const sysColor    = sysStatus === 'HEALTHY' ? C.green : sysStatus === 'WARNING' ? C.amber : C.red;
 
   const hours = Array(24).fill(0);
-  baseLogs.forEach(l => hours[new Date(l.timestamp).getHours()]++);
+  baseLogs.forEach(l => {
+    if (l.timestamp) hours[new Date(l.timestamp).getHours()]++;
+  });
   const peakHour      = hours.indexOf(Math.max(...hours));
   const peakHourCount = hours[peakHour];
 
@@ -214,7 +223,7 @@ export const exportToPDF = async (
   baseLogs.forEach(l => {
     const u = users.find(x => x.user_id === l.user_id);
     if (u) {
-      if (!perfMap[l.user_id]) perfMap[l.user_id] = { name: u.full_name, count: 0, role: u.role };
+      if (!perfMap[l.user_id]) perfMap[l.user_id] = { name: u.full_name ?? '', count: 0, role: u.role ?? '' };
       perfMap[l.user_id].count++;
     }
   });
@@ -222,8 +231,8 @@ export const exportToPDF = async (
 
   const actionMap: Record<string, number> = { CREATE:0, UPDATE:0, DELETE:0, LOGIN:0, EXTRACT:0, UPLOAD:0, ERROR:0, OTHER:0 };
   baseLogs.forEach(l => {
-    const a = l.action.toUpperCase();
-    if (isError(l.action) || isWarning(l.action)) actionMap['ERROR']++;
+    const a = safeAction(l.action).toUpperCase();
+    if (isError(safeAction(l.action)) || isWarning(safeAction(l.action))) actionMap['ERROR']++;
     else if (a.includes('CREATE'))  actionMap['CREATE']++;
     else if (a.includes('UPDATE'))  actionMap['UPDATE']++;
     else if (a.includes('DELETE'))  actionMap['DELETE']++;
@@ -246,7 +255,7 @@ export const exportToPDF = async (
 
   if (selectedUser) {
     doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); setColor(...C.white);
-    txt(`User: ${sanitize(selectedUser.full_name)} (@${selectedUser.username})`, PW - MG, 27, { align: 'right' });
+    txt(`User: ${sanitize(selectedUser.full_name ?? '')} (@${sanitize(selectedUser.username ?? '')})`, PW - MG, 27, { align: 'right' });
   }
   if (dateFilter) {
     const [yr, mo, dy] = dateFilter.split('-');
@@ -258,18 +267,18 @@ export const exportToPDF = async (
   y = 56;
 
   const kW = (CW - 9) / 4;
-  kpiCard(MG,        y, kW, 'Total Users',      users.length.toString(),        `${roleCounts.admin}A · ${roleCounts.doctor}D · ${roleCounts.staff}S`, C.blueL);
-  kpiCard(MG+kW+3,   y, kW, 'Total Activities', baseLogs.length.toString(),     `${monthStats.total} this month`, C.green);
-  kpiCard(MG+kW*2+6, y, kW, 'Success Rate',     `${successRate.toFixed(1)}%`,   `${failedCount} security event(s)`, failedCount > 0 ? C.red : C.green);
-  kpiCard(MG+kW*3+9, y, kW, 'Errors/Warnings',  errorLogs.length.toString(),    `${activeUsers} active user(s)`, errorLogs.length > 0 ? C.red : C.green);
+  kpiCard(MG,        y, kW, 'Total Users',      (users.length ?? 0).toString(),        `${roleCounts.admin ?? 0}A · ${roleCounts.doctor ?? 0}D · ${roleCounts.staff ?? 0}S`, C.blueL);
+  kpiCard(MG+kW+3,   y, kW, 'Total Activities', (baseLogs.length ?? 0).toString(),     `${monthStats.total ?? 0} this month`, C.green);
+  kpiCard(MG+kW*2+6, y, kW, 'Success Rate',     `${successRate.toFixed(1)}%`,          `${failedCount} security event(s)`, failedCount > 0 ? C.red : C.green);
+  kpiCard(MG+kW*3+9, y, kW, 'Errors/Warnings',  (errorLogs.length ?? 0).toString(),   `${activeUsers} active user(s)`, errorLogs.length > 0 ? C.red : C.green);
   y += CARD_H + 8;
 
   const snapW = (CW - 9) / 4;
   const snaps = [
-    { label: 'System Status',  value: sysStatus,                          color: sysColor  },
-    { label: 'Activity Trend', value: trendDir,                           color: trendColor},
-    { label: 'Peak Hour',      value: `${String(peakHour).padStart(2,'0')}:00`, color: C.blueL  },
-    { label: 'Daily Avg (7d)', value: avg7d.toFixed(1),                   color: C.purple  },
+    { label: 'System Status',  value: sysStatus,                                    color: sysColor  },
+    { label: 'Activity Trend', value: trendDir,                                     color: trendColor},
+    { label: 'Peak Hour',      value: `${String(peakHour).padStart(2,'0')}:00`,     color: C.blueL  },
+    { label: 'Daily Avg (7d)', value: avg7d.toFixed(1),                             color: C.purple  },
   ];
   snaps.forEach((s, i) => {
     const sx = MG + i * (snapW + 3);
@@ -283,7 +292,12 @@ export const exportToPDF = async (
   fillRound(MG, y, CW, 12, [239,246,255] as RGB, [193,214,254] as RGB, 2.5);
   doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); setColor(...C.blueL); txt('SCOPE', MG + 5, y + 5);
   doc.setFont('helvetica', 'normal'); setColor(...C.mid);
-  txt(selectedUser ? `Filtered to ${sanitize(selectedUser.full_name)} (${selectedUser.role}).` : `All ${users.length} users, ${baseLogs.length} total activities.`, MG + 22, y + 5);
+  txt(
+    selectedUser
+      ? `Filtered to ${sanitize(selectedUser.full_name ?? '')} (${selectedUser.role ?? ''}).`
+      : `All ${users.length} users, ${baseLogs.length} total activities.`,
+    MG + 22, y + 5
+  );
   doc.setFontSize(7); setColor(...C.sub);
   txt(`Report date: ${now.toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'numeric'})}${dateFilter ? `   |   Filter: ${dateFilter}` : ''}`, PW - MG, y + 5, { align: 'right' });
   doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); setColor(...C.sub);
@@ -292,9 +306,9 @@ export const exportToPDF = async (
 
   sectionLabel('Team Composition', C.blueL, `${users.length} users`);
   const roleRows = [
-    { label:'Administrator', count: roleCounts.admin,  color: C.red   },
-    { label:'Doctor',        count: roleCounts.doctor, color: C.green },
-    { label:'Medical Staff', count: roleCounts.staff,  color: C.amber },
+    { label:'Administrator', count: roleCounts.admin  ?? 0, color: C.red   },
+    { label:'Doctor',        count: roleCounts.doctor ?? 0, color: C.green },
+    { label:'Medical Staff', count: roleCounts.staff  ?? 0, color: C.amber },
   ];
   roleRows.forEach(r => {
     const pct = users.length > 0 ? r.count / users.length : 0;
@@ -316,14 +330,14 @@ export const exportToPDF = async (
 
   sectionLabel('Activity Overview — Last 7 Days', C.green, `Peak: ${peak7d}`);
 
-  const trendPct = activityByDay.data[0] > 0
-    ? (((activityByDay.data.at(-1)! - activityByDay.data[0]) / activityByDay.data[0]) * 100).toFixed(1) : '0';
+  const trendPct = safeData[0] > 0
+    ? (((safeData[safeData.length - 1] - safeData[0]) / safeData[0]) * 100).toFixed(1) : '0';
 
   const aKpis = [
-    { label:'7-Day Total',   value: total7d.toString(),  sub:'actions recorded',                        color: C.green  },
-    { label:'Daily Average', value: avg7d.toFixed(1),    sub:'per day',                                 color: C.blueL  },
-    { label:'Peak Day',      value: peak7d.toString(),   sub: activityByDay.labels[activityByDay.data.indexOf(peak7d)] || '—', color: C.purple },
-    { label:'Trend',         value: `${trendVal >= 0 ? '+' : ''}${trendVal}`, sub:`${trendPct}% vs. day 1`, color: trendColor },
+    { label:'7-Day Total',   value: total7d.toString(),  sub:'actions recorded',                                                      color: C.green  },
+    { label:'Daily Average', value: avg7d.toFixed(1),    sub:'per day',                                                               color: C.blueL  },
+    { label:'Peak Day',      value: peak7d.toString(),   sub: activityByDay.labels[safeData.indexOf(peak7d)] || '—',                  color: C.purple },
+    { label:'Trend',         value: `${trendVal >= 0 ? '+' : ''}${trendVal}`, sub:`${trendPct}% vs. day 1`,                          color: trendColor },
   ];
   const aW = (CW - 9) / 4;
   aKpis.forEach((k, i) => kpiCard(MG + i * (aW + 3), y, aW, k.label, k.value, k.sub, k.color));
@@ -343,7 +357,9 @@ export const exportToPDF = async (
       startY: y,
       head: [['Date','Day','Actions','vs. Avg','Sparkbar']],
       body: activityByDay.labels.map((date, i) => {
-        const d = new Date(date); const count = activityByDay.data[i]; const diff = count - avg7d;
+        const d     = new Date(date);
+        const count = safeData[i] ?? 0;
+        const diff  = count - avg7d;
         return [
           d.toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'numeric' }),
           d.toLocaleDateString('en-US', { weekday:'short' }),
@@ -390,10 +406,11 @@ export const exportToPDF = async (
     startY: y,
     head: [['Category','Count','%','Risk','Distribution']],
     body: actionRows.map(([cat, count]) => [
-      cat, count.toString(),
-      `${actionTotal > 0 ? ((count / actionTotal) * 100).toFixed(1) : 0}%`,
+      cat,
+      (count ?? 0).toString(),
+      `${actionTotal > 0 ? (((count ?? 0) / actionTotal) * 100).toFixed(1) : 0}%`,
       riskMap[cat] || 'Low',
-      '|'.repeat(Math.round((count / maxAction) * 18)),
+      '|'.repeat(Math.round(((count ?? 0) / maxAction) * 18)),
     ]),
     theme: 'striped',
     headStyles: { fillColor: C.amber, textColor: C.white, fontStyle:'bold', fontSize:7.5, font:'helvetica' },
@@ -421,10 +438,10 @@ export const exportToPDF = async (
 
   const eW = (CW - 9) / 4;
   const eKpis = [
-    { label:'Total Errors',    value: errorLogs.filter(l => isError(l.action)).length.toString(),    sub:'ERROR| prefixed',        color: C.red   },
-    { label:'Total Warnings',  value: errorLogs.filter(l => isWarning(l.action)).length.toString(),  sub:'WARNING| prefixed',      color: C.amber },
-    { label:'Security Events', value: secEvt.length.toString(),                                       sub:'failed login attempts',  color: C.red   },
-    { label:'System Health',   value: sysStatus,                                                      sub:`${successRate.toFixed(1)}% success rate`, color: sysColor },
+    { label:'Total Errors',    value: (errorLogs.filter(l => isError(safeAction(l.action))).length ?? 0).toString(),    sub:'ERROR| prefixed',        color: C.red   },
+    { label:'Total Warnings',  value: (errorLogs.filter(l => isWarning(safeAction(l.action))).length ?? 0).toString(),  sub:'WARNING| prefixed',      color: C.amber },
+    { label:'Security Events', value: (secEvt.length ?? 0).toString(),                                                   sub:'failed login attempts',  color: C.red   },
+    { label:'System Health',   value: sysStatus,                                                                          sub:`${successRate.toFixed(1)}% success rate`, color: sysColor },
   ];
   eKpis.forEach((k, i) => kpiCard(MG + i * (eW + 3), y, eW, k.label, k.value, k.sub, k.color));
   y += CARD_H + 6;
@@ -432,7 +449,7 @@ export const exportToPDF = async (
   if (errorLogs.length > 0 || secEvt.length > 0) {
     const combined = [...errorLogs, ...secEvt]
       .filter((v, i, a) => a.findIndex(x => x.log_id === v.log_id) === i)
-      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''))
       .slice(0, 20);
 
     autoTable(doc, {
@@ -440,13 +457,14 @@ export const exportToPDF = async (
       head: [['Timestamp','User','Type','Module','Detail']],
       body: combined.map(l => {
         const u = users.find(x => x.user_id === l.user_id);
-        const moduleMatch = l.action.match(/^(?:ERROR|WARNING)\|([^:]+)/);
-        const module = moduleMatch ? trunc(moduleMatch[1].replace(/_/g,' '), 18) : isSecurity(l.action) ? 'LOGIN' : '—';
-        const detail = trunc(l.action.replace(/^(?:ERROR|WARNING)\|[^:]+:\s*/, ''), 50);
+        const action = safeAction(l.action);
+        const moduleMatch = action.match(/^(?:ERROR|WARNING)\|([^:]+)/);
+        const module = moduleMatch ? trunc(moduleMatch[1].replace(/_/g,' '), 18) : isSecurity(action) ? 'LOGIN' : '—';
+        const detail = trunc(action.replace(/^(?:ERROR|WARNING)\|[^:]+:\s*/, ''), 50);
         return [
-          new Date(l.timestamp).toLocaleString('en-US', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }),
-          sanitize(u?.full_name || 'Unknown'),
-          isError(l.action) ? 'ERROR' : isWarning(l.action) ? 'WARNING' : 'SECURITY',
+          l.timestamp ? new Date(l.timestamp).toLocaleString('en-US', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—',
+          sanitize(u?.full_name ?? 'Unknown'),
+          isError(action) ? 'ERROR' : isWarning(action) ? 'WARNING' : 'SECURITY',
           module,
           sanitize(detail),
         ];
@@ -472,23 +490,23 @@ export const exportToPDF = async (
   } else {
     fillRound(MG, y, CW, 12, [240,253,244] as RGB, [134,239,172] as RGB, 2.5);
     doc.setFontSize(8); doc.setFont('helvetica','bold'); setColor(...C.green);
-    txt('✅  No errors, warnings, or security events detected.', MG + 6, y + 8); y += 18;
+    txt('No errors, warnings, or security events detected.', MG + 6, y + 8); y += 18;
   }
 
   needsPage(14);
   const monthLabel = now.toLocaleDateString('en-US', { month:'long', year:'numeric' });
-  sectionLabel(`Monthly Activity — ${monthLabel}`, C.purple, `${monthStats.total} actions`);
+  sectionLabel(`Monthly Activity — ${monthLabel}`, C.purple, `${monthStats.total ?? 0} actions`);
 
-  const avgPerUser = monthStats.uniqueUsers > 0 ? (monthStats.total / monthStats.uniqueUsers).toFixed(1) : '0';
-  const topActionRaw  = monthStats.topActions[0]?.[0] || '—';
+  const avgPerUser    = (monthStats.uniqueUsers ?? 0) > 0 ? ((monthStats.total ?? 0) / monthStats.uniqueUsers).toFixed(1) : '0';
+  const topActionRaw  = monthStats.topActions?.[0]?.[0] || '—';
   const topActionFmt  = wrapEvery(topActionRaw, 15);
-  const topActionCnt  = monthStats.topActions[0]?.[1] || 0;
+  const topActionCnt  = monthStats.topActions?.[0]?.[1] || 0;
 
   const mKpis = [
-    { label:'Total Actions',  value: monthStats.total.toString(),       sub:'this month',          color: C.green,  multi: false },
-    { label:'Active Users',   value: monthStats.uniqueUsers.toString(), sub:`of ${users.length}`,  color: C.blueL,  multi: false },
-    { label:'Avg / User',     value: avgPerUser,                        sub:'actions per person',  color: C.purple, multi: false },
-    { label:'Top Action',     value: topActionFmt,                      sub:`${topActionCnt}×`,    color: C.amber,  multi: true  },
+    { label:'Total Actions',  value: (monthStats.total ?? 0).toString(),       sub:'this month',          color: C.green,  multi: false },
+    { label:'Active Users',   value: (monthStats.uniqueUsers ?? 0).toString(), sub:`of ${users.length}`,  color: C.blueL,  multi: false },
+    { label:'Avg / User',     value: avgPerUser,                               sub:'actions per person',  color: C.purple, multi: false },
+    { label:'Top Action',     value: topActionFmt,                             sub:`${topActionCnt}×`,    color: C.amber,  multi: true  },
   ];
   const mW = (CW - 9) / 4;
   mKpis.forEach((k, i) => {
@@ -497,16 +515,17 @@ export const exportToPDF = async (
   });
   y += CARD_H + 6;
 
-  if (monthStats.topActions.length) {
+  if (monthStats.topActions?.length) {
     doc.setFontSize(7); doc.setFont('helvetica','bold'); setColor(...C.mid);
     txt('Top Actions This Month', MG, y); y += 4;
-    const maxAct = monthStats.topActions[0][1];
+    const maxAct = monthStats.topActions[0][1] ?? 1;
     monthStats.topActions.slice(0, 5).forEach(([action, count], i) => {
+      const safeCount = count ?? 0;
       doc.setFontSize(6.5); doc.setFont('helvetica','normal'); setColor(...C.mid);
-      txt(`${i + 1}. ${trunc(action, 28)}`, MG, y + 4);
+      txt(`${i + 1}. ${trunc(action ?? '', 28)}`, MG, y + 4);
       doc.setFont('helvetica','bold'); setColor(...C.blueL);
-      txt(`${count}  (${monthStats.total > 0 ? ((count/monthStats.total)*100).toFixed(1) : 0}%)`, MG + 90, y + 4);
-      hBar(MG + 120, y - 1, CW - 126, 5, count / maxAct, C.blueL); y += 7;
+      txt(`${safeCount}  (${(monthStats.total ?? 0) > 0 ? ((safeCount / (monthStats.total ?? 1)) * 100).toFixed(1) : 0}%)`, MG + 90, y + 4);
+      hBar(MG + 120, y - 1, CW - 126, 5, safeCount / maxAct, C.blueL); y += 7;
     });
     y += 3;
   }
@@ -515,14 +534,17 @@ export const exportToPDF = async (
     needsPage(14);
     const grouped: Record<string, Record<string, number>> = {};
     monthLogs.forEach(l => {
+      if (!l.timestamp) return;
       const dk = new Date(l.timestamp).toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'numeric' });
-      const ak = trunc(l.action, 45);
+      const ak = trunc(safeAction(l.action), 45);
       if (!grouped[dk]) grouped[dk] = {};
       grouped[dk][ak] = (grouped[dk][ak] || 0) + 1;
     });
     const tableBody: [string, string, string][] = [];
     Object.keys(grouped).sort().forEach(date => {
-      Object.entries(grouped[date]).forEach(([action, count]) => tableBody.push([date, action, count.toString()]));
+      Object.entries(grouped[date]).forEach(([action, count]) =>
+        tableBody.push([date, action, (count ?? 0).toString()])
+      );
     });
 
     autoTable(doc, {
@@ -554,9 +576,9 @@ export const exportToPDF = async (
   y += 4;
 
   [
-    { label:`${roleCounts.admin} Admin`,  color: C.red   },
-    { label:`${roleCounts.doctor} Doctor`, color: C.green },
-    { label:`${roleCounts.staff} Staff`,  color: C.amber },
+    { label:`${roleCounts.admin ?? 0} Admin`,  color: C.red   },
+    { label:`${roleCounts.doctor ?? 0} Doctor`, color: C.green },
+    { label:`${roleCounts.staff ?? 0} Staff`,  color: C.amber },
   ].forEach((b, i) => badge(MG + i * 38, y, b.label, b.color, C.white));
   y += 8;
 
@@ -564,13 +586,15 @@ export const exportToPDF = async (
     startY: y,
     head: [['ID','Username','Full Name','Role','Actions','Last Active','Status']],
     body: users.map(u => {
-      const ul = allLogs.filter(l => l.user_id === u.user_id);
-      const last = ul.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+      const ul = allLogs.filter(l => l != null && l.user_id === u.user_id);
+      const last = [...ul].sort((a,b) => new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime())[0];
       return [
-        `#${u.user_id}`, sanitize(u.username), sanitize(u.full_name),
+        `#${u.user_id ?? ''}`,
+        sanitize(u.username ?? ''),
+        sanitize(u.full_name ?? ''),
         u.role === 'admin' ? 'Admin' : u.role === 'doctor' ? 'Doctor' : 'Staff',
-        ul.length.toString(),
-        last ? new Date(last.timestamp).toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'2-digit'}) : 'Never',
+        (ul.length ?? 0).toString(),
+        last?.timestamp ? new Date(last.timestamp).toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'2-digit'}) : 'Never',
         ul.length === 0 ? 'Inactive' : 'Active',
       ];
     }),
@@ -617,16 +641,16 @@ export const exportToPDF = async (
 
   const s8W = (CW - 9) / 4;
   const healthRow1 = [
-    { label:'Total Activities', value: baseLogs.length.toString(),        sub:'all time',                color: C.blueL  },
-    { label:'Success Rate',     value: `${successRate.toFixed(1)}%`,      sub:'non-failed',              color: successRate >= 90 ? C.green : C.red },
-    { label:'Security Events',  value: failedCount.toString(),            sub:'failed logins',           color: failedCount > 0 ? C.red : C.green },
-    { label:'Errors/Warnings',  value: errorLogs.length.toString(),       sub:'logged errors',           color: errorLogs.length > 0 ? C.red : C.green },
+    { label:'Total Activities', value: (baseLogs.length ?? 0).toString(),     sub:'all time',                color: C.blueL  },
+    { label:'Success Rate',     value: `${successRate.toFixed(1)}%`,          sub:'non-failed',              color: successRate >= 90 ? C.green : C.red },
+    { label:'Security Events',  value: (failedCount ?? 0).toString(),         sub:'failed logins',           color: failedCount > 0 ? C.red : C.green },
+    { label:'Errors/Warnings',  value: (errorLogs.length ?? 0).toString(),    sub:'logged errors',           color: errorLogs.length > 0 ? C.red : C.green },
   ];
   const healthRow2 = [
-    { label:'Activity Trend',   value: trendDir,                          sub:`${trendPct}% vs. day 1`,  color: trendColor },
-    { label:'Monthly Total',    value: monthStats.total.toString(),       sub: monthLabel,               color: C.purple  },
-    { label:'Peak Hour',        value: `${String(peakHour).padStart(2,'0')}:00`, sub:`${peakHourCount} actions`, color: C.amber   },
-    { label:'Top Performer',    value: trunc(sanitize(topPerfs[0]?.name || 'N/A'), 14), sub:`${topPerfs[0]?.count || 0} actions`, color: C.purple },
+    { label:'Activity Trend',   value: trendDir,                                                   sub:`${trendPct}% vs. day 1`,          color: trendColor },
+    { label:'Monthly Total',    value: (monthStats.total ?? 0).toString(),                         sub: monthLabel,                       color: C.purple  },
+    { label:'Peak Hour',        value: `${String(peakHour).padStart(2,'0')}:00`,                   sub:`${peakHourCount ?? 0} actions`,   color: C.amber   },
+    { label:'Top Performer',    value: trunc(sanitize(topPerfs[0]?.name ?? 'N/A'), 14),            sub:`${topPerfs[0]?.count ?? 0} actions`, color: C.purple },
   ];
   healthRow1.forEach((k, i) => kpiCard(MG + i * (s8W + 3), y, s8W, k.label, k.value, k.sub, k.color));
   y += CARD_H + 4;
@@ -645,7 +669,7 @@ export const exportToPDF = async (
     const tagColor: RGB = isWarn ? C.red         : isRec ? C.blueL       : C.green;
     const tag = isWarn ? 'WARN' : isRec ? 'ACTION' : 'INFO';
 
-    const clean = sanitize(insight.replace('[WARNING]','').trim());
+    const clean = sanitize((insight ?? '').replace('[WARNING]','').trim());
     const lines = doc.splitTextToSize(clean, CW - 28);
     const boxH  = Math.max(12, lines.length * 4.2 + 6);
 
@@ -671,8 +695,10 @@ export const exportToPDF = async (
       body: secEvt.slice(0, 15).map(l => {
         const u = users.find(x => x.user_id === l.user_id);
         return [
-          new Date(l.timestamp).toLocaleString('en-US',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}),
-          l.user_id.toString(), sanitize(u?.full_name || 'Unknown'), sanitize(l.action),
+          l.timestamp ? new Date(l.timestamp).toLocaleString('en-US',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—',
+          (l.user_id ?? '').toString(),
+          sanitize(u?.full_name ?? 'Unknown'),
+          sanitize(safeAction(l.action)),
         ];
       }),
       theme: 'plain',
@@ -697,9 +723,9 @@ export const exportToPDF = async (
 
   stampFooters();
 
-  const dateStr       = now.toISOString().split('T')[0];
-  const userStr       = selectedUser ? `_user${selectedUser.user_id}` : '';
-  const filterStr     = dateFilter   ? `_${dateFilter}` : '';
+  const dateStr   = now.toISOString().split('T')[0];
+  const userStr   = selectedUser ? `_user${selectedUser.user_id}` : '';
+  const filterStr = dateFilter   ? `_${dateFilter}` : '';
   doc.save(`stegoshield_report_${dateStr}${userStr}${filterStr}.pdf`);
 
   showNotification('Report exported successfully!', 'success');

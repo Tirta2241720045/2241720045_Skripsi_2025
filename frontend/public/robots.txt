@@ -1,3 +1,18 @@
-# https://www.robotstxt.org/robotstxt.html
 User-agent: *
-Disallow:
+Allow: /$
+Allow: /login
+Disallow: /dashboard
+Disallow: /dashboard/
+Disallow: /patients
+Disallow: /patients/
+Disallow: /steganography
+Disallow: /steganography/
+Disallow: /reports
+Disallow: /reports/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /profile
+Disallow: /profile/
+Disallow: /static/
+Disallow: /*.json$
+Disallow: /*.map$
