@@ -28,6 +28,8 @@ app.add_middleware(
         "http://localhost:5173",
         os.getenv("FRONTEND_URL", ""),
         "https://*.onrender.com",
+        "https://2241720045-skripsi-2025.vercel.app",
+        "https://*.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
