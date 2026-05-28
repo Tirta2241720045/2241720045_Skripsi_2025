@@ -7,19 +7,22 @@ import cv2
 from joblib import load
 from os.path import dirname, join
 
-from app.core.nriqa.brisque import brisque, calculate_mscn as _brisque_mscn
+from app.core.nriqa.brisque import brisque
 from app.core.nriqa.niqe import niqe
 from app.core.nriqa.piqe import piqe
 
 _SVR_MODEL_PATH = join(dirname(__file__), 'nriqa', 'svr_brisque.joblib')
 _svr_model = None
+_scaler = None
 
 
 def _get_svr_model():
-    global _svr_model
+    global _svr_model, _scaler
     if _svr_model is None:
-        _svr_model = load(_SVR_MODEL_PATH)
-    return _svr_model
+        model_data = load(_SVR_MODEL_PATH)
+        _svr_model = model_data['model']
+        _scaler = model_data['scaler']
+    return _svr_model, _scaler
 
 
 def _shuffled_indices(indices: np.ndarray) -> np.ndarray:
@@ -152,39 +155,27 @@ class LSBHandler:
         try:
             img_bgr = np.array(img.convert('RGB'))[:, :, ::-1]
 
-            # BRISQUE
             try:
-                print("BRISQUE: extracting features...")
                 features = brisque(img_bgr.copy()).reshape(1, -1)
-                print(f"BRISQUE: features shape = {features.shape}")
-                clf = _get_svr_model()
-                print("BRISQUE: SVR model loaded")
-                brisque_score = round(float(clf.predict(features)[0]), 4)
-                print(f"BRISQUE: score = {brisque_score}")
-            except Exception as e:
-                print(f"BRISQUE ERROR: {e}")
-                import traceback
-                traceback.print_exc()
+                clf, scaler = _get_svr_model()
+                features_scaled = scaler.transform(features)
+                brisque_score = round(float(clf.predict(features_scaled)[0]), 4)
+            except Exception:
+                pass
 
-            # NIQE
             try:
-                print("NIQE: processing...")
                 niqe_score = round(float(niqe(img_bgr.copy())), 4)
-                print(f"NIQE: score = {niqe_score}")
-            except Exception as e:
-                print(f"NIQE ERROR: {e}")
+            except Exception:
+                pass
 
-            # PIQE
             try:
-                print("PIQE: processing...")
                 score, _, _, _ = piqe(img_bgr.copy())
                 piqe_score = round(float(score), 4)
-                print(f"PIQE: score = {piqe_score}")
-            except Exception as e:
-                print(f"PIQE ERROR: {e}")
+            except Exception:
+                pass
 
-        except Exception as e:
-            print(f"NRIQA outer error: {e}")
+        except Exception:
+            pass
 
         return {'brisque': brisque_score, 'niqe': niqe_score, 'piqe': piqe_score}
 
