@@ -21,7 +21,6 @@ backend/htmlcov/
 *.bin
 *.h5
 *.onnx
-*.joblib
 *.pickle
 
 # ====================
