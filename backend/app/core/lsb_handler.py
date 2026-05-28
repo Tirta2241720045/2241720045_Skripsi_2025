@@ -150,29 +150,41 @@ class LSBHandler:
     def calculate_nriqa_metrics(img: Image.Image, mode: str = 'L') -> dict:
         brisque_score = niqe_score = piqe_score = None
         try:
-            img_gray = np.array(img.convert('L'))
             img_bgr = np.array(img.convert('RGB'))[:, :, ::-1]
 
+            # BRISQUE
             try:
+                print("BRISQUE: extracting features...")
                 features = brisque(img_bgr.copy()).reshape(1, -1)
+                print(f"BRISQUE: features shape = {features.shape}")
                 clf = _get_svr_model()
+                print("BRISQUE: SVR model loaded")
                 brisque_score = round(float(clf.predict(features)[0]), 4)
-            except Exception:
-                pass
+                print(f"BRISQUE: score = {brisque_score}")
+            except Exception as e:
+                print(f"BRISQUE ERROR: {e}")
+                import traceback
+                traceback.print_exc()
 
+            # NIQE
             try:
+                print("NIQE: processing...")
                 niqe_score = round(float(niqe(img_bgr.copy())), 4)
-            except Exception:
-                pass
+                print(f"NIQE: score = {niqe_score}")
+            except Exception as e:
+                print(f"NIQE ERROR: {e}")
 
+            # PIQE
             try:
+                print("PIQE: processing...")
                 score, _, _, _ = piqe(img_bgr.copy())
                 piqe_score = round(float(score), 4)
-            except Exception:
-                pass
+                print(f"PIQE: score = {piqe_score}")
+            except Exception as e:
+                print(f"PIQE ERROR: {e}")
 
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"NRIQA outer error: {e}")
 
         return {'brisque': brisque_score, 'niqe': niqe_score, 'piqe': piqe_score}
 
