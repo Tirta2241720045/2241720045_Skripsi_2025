@@ -3,16 +3,23 @@ import numpy as np
 import math
 import struct
 import io
-import torch
-import pyiqa
+import cv2
+from joblib import load
+from os.path import dirname, join
 
-_METRIC_CACHE: dict = {}
+from app.core.nriqa.brisque import brisque, calculate_mscn as _brisque_mscn
+from app.core.nriqa.niqe import niqe
+from app.core.nriqa.piqe import piqe
 
-def _get_metric(name: str, **kwargs):
-    key = name
-    if key not in _METRIC_CACHE:
-        _METRIC_CACHE[key] = pyiqa.create_metric(name, device='cpu', **kwargs)
-    return _METRIC_CACHE[key]
+_SVR_MODEL_PATH = join(dirname(__file__), 'nriqa', 'svr_brisque.joblib')
+_svr_model = None
+
+
+def _get_svr_model():
+    global _svr_model
+    if _svr_model is None:
+        _svr_model = load(_SVR_MODEL_PATH)
+    return _svr_model
 
 
 def _shuffled_indices(indices: np.ndarray) -> np.ndarray:
@@ -143,25 +150,30 @@ class LSBHandler:
     def calculate_nriqa_metrics(img: Image.Image, mode: str = 'L') -> dict:
         brisque_score = niqe_score = piqe_score = None
         try:
-            img_np = np.array(img.convert('RGB')).astype(np.float32) / 255.0
-            tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0)
-            for name, kwargs in [
-                ('brisque', {'test_y_channel': True}),
-                ('niqe', {'test_y_channel': True}),
-                ('piqe', {}),
-            ]:
-                try:
-                    score = round(_get_metric(name, **kwargs)(tensor).item(), 4)
-                    if name == 'brisque':
-                        brisque_score = score
-                    elif name == 'niqe':
-                        niqe_score = score
-                    else:
-                        piqe_score = score
-                except Exception:
-                    pass
+            img_gray = np.array(img.convert('L'))
+            img_bgr = np.array(img.convert('RGB'))[:, :, ::-1]
+
+            try:
+                features = brisque(img_bgr.copy()).reshape(1, -1)
+                clf = _get_svr_model()
+                brisque_score = round(float(clf.predict(features)[0]), 4)
+            except Exception:
+                pass
+
+            try:
+                niqe_score = round(float(niqe(img_bgr.copy())), 4)
+            except Exception:
+                pass
+
+            try:
+                score, _, _, _ = piqe(img_bgr.copy())
+                piqe_score = round(float(score), 4)
+            except Exception:
+                pass
+
         except Exception:
             pass
+
         return {'brisque': brisque_score, 'niqe': niqe_score, 'piqe': piqe_score}
 
     @staticmethod

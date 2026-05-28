@@ -174,14 +174,12 @@ def _update_extract_to_xlsx(
     ws1 = wb["Layer 1"]
     ws2 = wb["Layer 2"]
     ws3 = wb["Timing"]
-
     for row in ws3.iter_rows(min_row=2):
         if str(row[1].value) == str(record_id) and row[9].value is None:
             row[9].value  = _safe_float(extract_layer1_seconds)
             row[10].value = _safe_float(extract_layer2_seconds)
             row[11].value = _safe_float(extract_total_seconds)
             break
-
     for row in ws1.iter_rows(min_row=2):
         if str(row[1].value) == str(record_id) and row[9].value is None:
             row[9].value  = _safe_float(metrics_l1_extract.get("mse"))
@@ -191,7 +189,6 @@ def _update_extract_to_xlsx(
             row[13].value = _safe_float(metrics_l1_extract.get("niqe"))
             row[14].value = _safe_float(metrics_l1_extract.get("piqe"))
             break
-
     for row in ws2.iter_rows(min_row=2):
         if str(row[1].value) == str(record_id) and row[9].value is None:
             row[9].value  = _safe_float(metrics_l2_extract.get("mse"))
@@ -201,7 +198,6 @@ def _update_extract_to_xlsx(
             row[13].value = _safe_float(metrics_l2_extract.get("niqe"))
             row[14].value = _safe_float(metrics_l2_extract.get("piqe"))
             break
-
     wb.save(DOCUMENTATION_XLSX_PATH)
 
 
@@ -286,11 +282,6 @@ def _pil_to_bytes(img: Image.Image) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format='PNG', compress_level=1)
     return buf.getvalue()
-
-
-def _estimate_png_size(img: Image.Image) -> int:
-    arr = np.array(img)
-    return int(arr.size * 1.05) + 1024
 
 
 def _pack_encrypted(encrypted: dict) -> bytes:
@@ -816,4 +807,8 @@ async def delete_medical_record(
     db.delete(record)
     db.commit()
     write_log(db, current_user.user_id, f"DELETE_MEDICAL_RECORD: record_id={record_id}, patient_id={patient_id}")
-    return {"message": f"Rekam medis #{record_id} berhasil dihapus", "record_id": record_id, "files_deleted": {"deleted": deleted, "count": len(deleted)}}
+    return {
+        "message": f"Rekam medis #{record_id} berhasil dihapus",
+        "record_id": record_id,
+        "files_deleted": {"deleted": deleted, "count": len(deleted)},
+    }
