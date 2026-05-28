@@ -48,7 +48,17 @@ const PIPELINE_INFO = {
   error: { icon: '⚠️', title: 'Pipeline Failed', body: 'An error occurred during extraction. Please verify the stego image integrity and try again.' },
 };
 
-const MetricBadge = ({ label, val, type }: { label: string; val: string; type: '' | 'good' | 'ok' | 'bad' }) => (
+const getQualityType = (psnr: number, ssim: number, mse: number, brisque: number, niqe: number, piqe: number, acctxt: number | null): 'good' | 'ok' | 'bad' => {
+  if (psnr >= 40 && ssim >= 0.95 && mse >= 0 && brisque < 45 && niqe <= 8 && piqe < 35 && (acctxt === null || acctxt === 100)) {
+    return 'good';
+  }
+  if (psnr >= 30 && ssim >= 0.85 && brisque < 50 && niqe <= 12 && piqe < 45 && (acctxt === null || acctxt >= 90)) {
+    return 'ok';
+  }
+  return 'bad';
+};
+
+const MetricBadge = ({ label, val, type }: { label: string; val: string; type: 'good' | 'ok' | 'bad' }) => (
   <div className={`dmc-mbadge ${type}`}>
     <span className="dmc-mbadge-l">{label}</span>
     <span className="dmc-mbadge-v">{val}</span>
@@ -171,15 +181,16 @@ const MetricsSlider = ({ metrics, stegoKb, acctxt, extractFileSizes }: {
         <>
           {(['layer1_mri_stego', 'layer2_photo_stego'] as const).map(key => {
             const m = metrics[key];
+            const type = getQualityType(m.psnr, m.ssim, m.mse, 0, 0, 0, null);
             return (
               <div className="dmc-metrics-layer-group" key={key}>
                 <div className="dmc-metrics-layer-label">
                   {key === 'layer1_mri_stego' ? 'Layer 1 — MRI' : 'Layer 2 — Photo'}
                 </div>
                 <div className="dmc-metrics-badges-vertical">
-                  <MetricBadge label="MSE" val={m.mse.toFixed(3)} type="" />
-                  <MetricBadge label="PSNR" val={`${m.psnr.toFixed(1)} dB`} type={m.psnr >= 40 ? 'good' : m.psnr >= 30 ? 'ok' : 'bad'} />
-                  <MetricBadge label="SSIM" val={m.ssim.toFixed(4)} type={m.ssim >= 0.95 ? 'good' : m.ssim >= 0.85 ? 'ok' : 'bad'} />
+                  <MetricBadge label="MSE" val={m.mse.toFixed(3)} type={type} />
+                  <MetricBadge label="PSNR" val={`${m.psnr.toFixed(1)} dB`} type={type} />
+                  <MetricBadge label="SSIM" val={m.ssim.toFixed(4)} type={type} />
                 </div>
               </div>
             );
@@ -194,15 +205,16 @@ const MetricsSlider = ({ metrics, stegoKb, acctxt, extractFileSizes }: {
         <>
           {(['layer1_mri_stego', 'layer2_photo_stego'] as const).map(key => {
             const m = metrics[key];
+            const type = getQualityType(0, 0, 0, m.brisque || 0, m.niqe || 0, m.piqe || 0, null);
             return (
               <div className="dmc-metrics-layer-group" key={key}>
                 <div className="dmc-metrics-layer-label">
                   {key === 'layer1_mri_stego' ? 'Layer 1 — MRI' : 'Layer 2 — Photo'}
                 </div>
                 <div className="dmc-metrics-badges-vertical">
-                  <MetricBadge label="BRISQUE" val={m.brisque.toFixed(3)} type={m.brisque <= 20 ? 'good' : m.brisque <= 40 ? 'ok' : 'bad'} />
-                  <MetricBadge label="NIQE" val={m.niqe.toFixed(3)} type={m.niqe <= 3 ? 'good' : m.niqe <= 5 ? 'ok' : 'bad'} />
-                  <MetricBadge label="PIQE" val={m.piqe.toFixed(3)} type={m.piqe <= 20 ? 'good' : m.piqe <= 40 ? 'ok' : 'bad'} />
+                  <MetricBadge label="BRISQUE" val={m.brisque?.toFixed(3) || 'N/A'} type={type} />
+                  <MetricBadge label="NIQE" val={m.niqe?.toFixed(3) || 'N/A'} type={type} />
+                  <MetricBadge label="PIQE" val={m.piqe?.toFixed(3) || 'N/A'} type={type} />
                 </div>
               </div>
             );
@@ -352,7 +364,6 @@ const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: {
         ))}
       </div>
 
-      {/* FIX #3: Single unified MetricsSlider — embedding mode (before extract) */}
       {record?.quality_metrics?.embedding && !extracted && (
         <MetricsSlider
           metrics={record.quality_metrics.embedding}
@@ -362,7 +373,6 @@ const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: {
         />
       )}
 
-      {/* FIX #3: Single unified MetricsSlider — extraction mode (after extract) */}
       {extracted?.quality_metrics?.extraction && (
         <MetricsSlider
           metrics={extracted.quality_metrics.extraction}
@@ -371,7 +381,6 @@ const PipelineContent = ({ steps, pipelineStatus, record, extracted, plInfo }: {
         />
       )}
 
-      {/* FIX #4: Execution Time card — shown after successful extraction */}
       {extracted && pipelineStatus === 'done' && extracted.extract_time_seconds !== undefined && (
         <div className="dmc-exec-time-card">
           <div className="dmc-exec-time-icon">⏱</div>
@@ -712,7 +721,6 @@ const DashboardDoctor = () => {
                     <div className="dmc-empty"><span>📁</span><p>No medical records found for this patient.</p></div>
                   ) : (
                     <>
-                      {/* FIX #2: reduced vertical padding on records-tabs */}
                       <div className="dmc-records-tabs">
                         <div className="dmc-records-tab-list">
                           {medicalRecords.map((rec, idx) => (
@@ -736,7 +744,6 @@ const DashboardDoctor = () => {
 
                       {tab === 'stego' && (
                         <div className="dmc-tab-body">
-                          {/* FIX #1: dmc-med-card-sharp — zero border-radius, no outer margin/padding */}
                           <div className="dmc-card dmc-med-card dmc-med-card-sharp">
                             <div className="dmc-card-hd">
                               <span className="dmc-card-title">Medical Data Preview</span>
@@ -766,7 +773,6 @@ const DashboardDoctor = () => {
                               <p>Extracting and decrypting medical data…</p>
                             </div>
                           ) : extracted ? (
-                            /* FIX #1: dmc-extract-card-sharp — zero border-radius, no outer margin/padding */
                             <div className="dmc-card dmc-extract-card dmc-extract-card-sharp">
                               <div className="dmc-card-hd">
                                 <span className="dmc-card-title">Diagnosis, Clinical Notes &amp; Medical Image</span>
