@@ -34,6 +34,7 @@ for d in [DIR_ORIGINAL, DIR_EMBEDDING, DIR_EXTRACT, DIR_VISUAL, DIR_CSV]:
 DOCUMENTATION_XLSX_PATH = os.path.join(DIR_CSV, "documentation.xlsx")
 
 MRI_BORDER_RATIO = 0.15
+PHOTO_MAX_SIDE = 2560
 
 _HEADER_FILL = PatternFill("solid", start_color="2F5496")
 _HEADER_FONT = Font(name="Arial", bold=True, color="FFFFFF", size=10)
@@ -295,6 +296,17 @@ def _unpack_encrypted(raw: str) -> Tuple[str, str, str]:
     return parts[0], parts[1], parts[2]
 
 
+def _resize_photo_cover(img: Image.Image, max_side: int = PHOTO_MAX_SIDE) -> Image.Image:
+    w, h = img.size
+    longest = max(w, h)
+    if longest <= max_side:
+        return img
+    scale = max_side / longest
+    new_w = round(w * scale)
+    new_h = round(h * scale)
+    return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+
 def _fmt_metrics(m) -> Optional[dict]:
     if not m:
         return None
@@ -376,6 +388,8 @@ async def upload_medical_data(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File gambar tidak valid: {str(e)}")
 
+    img_photo = _resize_photo_cover(img_photo.convert('RGB'))
+
     mri_w, mri_h = img_mri.size
     photo_w, photo_h = img_photo.size
 
@@ -391,7 +405,7 @@ async def upload_medical_data(
     stego_out_path = os.path.join(DIR_EMBEDDING, f"stego_{prefix}.png")
 
     img_mri_gray = img_mri.convert('L')
-    img_photo_rgb = img_photo.convert('RGB')
+    img_photo_rgb = img_photo
 
     try:
         img_photo_rgb.save(orig_photo_path, format='PNG', compress_level=9)
@@ -622,7 +636,7 @@ async def extract_medical_data(
         with open(ext_txt_path, "w", encoding="utf-8", newline='\n') as f:
             f.write(decrypted)
 
-        _save_image(extracted_mri_img, ext_mri_path, compress_level=0)
+        _save_image(extracted_mri_img, ext_mri_path, compress_level=3)
 
         stego_array = np.array(stego_img, dtype=np.uint8)
         cleaned_photo_array = stego_array & np.uint8(0xFE)
