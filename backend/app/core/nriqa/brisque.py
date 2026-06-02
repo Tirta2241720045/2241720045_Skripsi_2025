@@ -2,6 +2,8 @@ import math
 import numpy as np
 import cv2
 import scipy.special
+import scipy.ndimage
+from os.path import dirname
 
 gamma_range = np.arange(0.2, 10, 0.001)
 _a = scipy.special.gamma(2.0 / gamma_range)
@@ -10,89 +12,116 @@ _b = scipy.special.gamma(1.0 / gamma_range)
 _c = scipy.special.gamma(3.0 / gamma_range)
 prec_gammas = _a / (_b * _c)
 
+def _gen_gauss_window(lw: int, sigma: float):
+    lw = int(lw)
+    sd2 = float(sigma) ** 2
+    weights = [0.0] * (2 * lw + 1)
+    weights[lw] = 1.0
+    sum_ = 1.0
+    for ii in range(1, lw + 1):
+        tmp = math.exp(-0.5 * ii * ii / sd2)
+        weights[lw + ii] = tmp
+        weights[lw - ii] = tmp
+        sum_ += 2.0 * tmp
+    return [w / sum_ for w in weights]
 
-def aggd_features(imdata):
-    imdata.shape = (len(imdata.flat),)
+def compute_mscn(image: np.ndarray, C: float = 1.0) -> np.ndarray:
+    avg_window = _gen_gauss_window(3, 7.0 / 6.0)
+    assert image.ndim == 2
+    h, w = image.shape
+    mu_image = np.zeros((h, w), dtype=np.float32)
+    var_image = np.zeros((h, w), dtype=np.float32)
+    image_f = image.astype(np.float32)
+
+    scipy.ndimage.correlate1d(image_f, avg_window, 0, mu_image, mode='constant')
+    scipy.ndimage.correlate1d(mu_image, avg_window, 1, mu_image, mode='constant')
+    scipy.ndimage.correlate1d(image_f ** 2, avg_window, 0, var_image, mode='constant')
+    scipy.ndimage.correlate1d(var_image, avg_window, 1, var_image, mode='constant')
+
+    var_image = np.sqrt(np.abs(var_image - mu_image ** 2))
+    return (image_f - mu_image) / (var_image + C)
+
+def ggd_features(imdata: np.ndarray):
+    nr_gam = 1.0 / prec_gammas
+    sigma_sq = float(np.var(imdata))
+    E = float(np.mean(np.abs(imdata)))
+    if E == 0:
+        return 0.2, sigma_sq
+    rho = sigma_sq / (E ** 2)
+    pos = np.argmin(np.abs(nr_gam - rho))
+    return float(gamma_range[pos]), sigma_sq
+
+def aggd_features(imdata: np.ndarray):
+    imdata = imdata.ravel()
     imdata2 = imdata * imdata
-    left_data = imdata2[imdata < 0]
-    right_data = imdata2[imdata >= 0]
-    left_mean_sqrt = 0
-    right_mean_sqrt = 0
-    if len(left_data) > 0:
-        left_mean_sqrt = np.sqrt(np.average(left_data))
-    if len(right_data) > 0:
-        right_mean_sqrt = np.sqrt(np.average(right_data))
-    if right_mean_sqrt != 0:
-        gamma_hat = left_mean_sqrt / right_mean_sqrt
-    else:
-        gamma_hat = np.inf
-    imdata2_mean = np.mean(imdata2)
+    left_d = imdata2[imdata < 0]
+    right_d = imdata2[imdata >= 0]
+
+    lsq = np.sqrt(left_d.mean()) if left_d.size > 0 else 0.0
+    rsq = np.sqrt(right_d.mean()) if right_d.size > 0 else 0.0
+
+    gamma_hat = (lsq / rsq) if rsq != 0 else np.inf
+    imdata2_mean = imdata2.mean()
     if imdata2_mean != 0:
-        r_hat = (np.average(np.abs(imdata)) ** 2) / np.average(imdata2)
+        r_hat = (np.abs(imdata).mean() ** 2) / imdata2_mean
     else:
         r_hat = np.inf
+
     rhat_norm = r_hat * (
         ((math.pow(gamma_hat, 3) + 1) * (gamma_hat + 1))
         / math.pow(math.pow(gamma_hat, 2) + 1, 2)
     )
+
     pos = np.argmin((prec_gammas - rhat_norm) ** 2)
-    alpha = gamma_range[pos]
+    alpha = float(gamma_range[pos])
+
     gam1 = scipy.special.gamma(1.0 / alpha)
     gam2 = scipy.special.gamma(2.0 / alpha)
     gam3 = scipy.special.gamma(3.0 / alpha)
-    aggdratio = np.sqrt(gam1) / np.sqrt(gam3)
-    bl = aggdratio * left_mean_sqrt
-    br = aggdratio * right_mean_sqrt
+
+    ratio = np.sqrt(gam1) / np.sqrt(gam3)
+    bl = ratio * lsq
+    br = ratio * rsq
     N = (br - bl) * (gam2 / gam1)
-    return (alpha, N, bl, br, left_mean_sqrt, right_mean_sqrt)
 
+    return alpha, N, bl, br, lsq, rsq
 
-def ggd_features(imdata):
-    nr_gam = 1 / prec_gammas
-    sigma_sq = np.var(imdata)
-    E = np.mean(np.abs(imdata))
-    rho = sigma_sq / E ** 2
-    pos = np.argmin(np.abs(nr_gam - rho))
-    return gamma_range[pos], sigma_sq
-
-
-def paired_product(new_im):
-    shift1 = np.roll(new_im.copy(), 1, axis=1)
-    shift2 = np.roll(new_im.copy(), 1, axis=0)
-    shift3 = np.roll(np.roll(new_im.copy(), 1, axis=0), 1, axis=1)
-    shift4 = np.roll(np.roll(new_im.copy(), 1, axis=0), -1, axis=1)
+def paired_product(new_im: np.ndarray):
+    shift1 = np.roll(new_im, 1, axis=1)
+    shift2 = np.roll(new_im, 1, axis=0)
+    shift3 = np.roll(np.roll(new_im, 1, axis=0), 1, axis=1)
+    shift4 = np.roll(np.roll(new_im, 1, axis=0), -1, axis=1)
     return shift1 * new_im, shift2 * new_im, shift3 * new_im, shift4 * new_im
 
-
-def calculate_mscn(dis_image):
-    dis_image = dis_image.astype(np.float32)
-    ux = cv2.GaussianBlur(dis_image, (7, 7), 7 / 6)
-    sigma = np.sqrt(np.abs(cv2.GaussianBlur(dis_image ** 2, (7, 7), 7 / 6) - ux * ux))
-    return (dis_image - ux) / (1 + sigma)
-
-
-def extract_brisque_feats(mscncoefs):
-    alpha_m, sigma_sq = ggd_features(mscncoefs.copy())
+def extract_brisque_feats(mscncoefs: np.ndarray) -> list:
+    alpha_m, sigma_sq = ggd_features(mscncoefs.ravel())
     pps1, pps2, pps3, pps4 = paired_product(mscncoefs)
-    alpha1, N1, bl1, br1, lsq1, rsq1 = aggd_features(pps1)
-    alpha2, N2, bl2, br2, lsq2, rsq2 = aggd_features(pps2)
-    alpha3, N3, bl3, br3, lsq3, rsq3 = aggd_features(pps3)
-    alpha4, N4, bl4, br4, lsq4, rsq4 = aggd_features(pps4)
+
+    a1, N1, _, _, lsq1, rsq1 = aggd_features(pps1)
+    a2, N2, _, _, lsq2, rsq2 = aggd_features(pps2)
+    a3, N3, _, _, lsq3, rsq3 = aggd_features(pps3)
+    a4, N4, _, _, lsq4, rsq4 = aggd_features(pps4)
+
     return [
         alpha_m, sigma_sq,
-        alpha1, N1, lsq1 ** 2, rsq1 ** 2,
-        alpha2, N2, lsq2 ** 2, rsq2 ** 2,
-        alpha3, N3, lsq3 ** 2, rsq3 ** 2,
-        alpha4, N4, lsq4 ** 2, rsq4 ** 2,
+        a1, N1, lsq1 ** 2, rsq1 ** 2,
+        a2, N2, lsq2 ** 2, rsq2 ** 2,
+        a3, N3, lsq3 ** 2, rsq3 ** 2,
+        a4, N4, lsq4 ** 2, rsq4 ** 2,
     ]
 
-
-def brisque(im):
-    if len(im.shape) == 3:
+def brisque(im: np.ndarray) -> np.ndarray:
+    if im.ndim == 3:
         im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-    mscncoefs = calculate_mscn(im)
-    features1 = extract_brisque_feats(mscncoefs)
-    low_res = cv2.resize(im, (0, 0), fx=0.5, fy=0.5)
-    mscncoefs2 = calculate_mscn(low_res)
-    features2 = extract_brisque_feats(mscncoefs2)
-    return np.array(features1 + features2)
+
+    im = im.astype(np.float64)
+
+    mscn1 = compute_mscn(im)
+    feats1 = extract_brisque_feats(mscn1)
+
+    low_res = cv2.resize(im, (0, 0), fx=0.5, fy=0.5,
+                           interpolation=cv2.INTER_LINEAR)
+    mscn2 = compute_mscn(low_res)
+    feats2 = extract_brisque_feats(mscn2)
+
+    return np.array(feats1 + feats2, dtype=np.float64)
