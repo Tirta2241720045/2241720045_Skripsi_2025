@@ -5,7 +5,7 @@ import scipy.special
 import scipy.ndimage
 import scipy.io
 import scipy.linalg
-import os
+from os.path import dirname, join
 
 gamma_range = np.arange(0.2, 10, 0.001)
 _a = scipy.special.gamma(2.0 / gamma_range)
@@ -14,21 +14,6 @@ _b = scipy.special.gamma(1.0 / gamma_range)
 _c = scipy.special.gamma(3.0 / gamma_range)
 prec_gammas = _a / (_b * _c)
 
-_params_path = os.path.join(os.path.dirname(__file__), 'niqe_image_params.mat')
-_pop_mu = None
-_pop_cov = None
-
-def _load_params():
-    global _pop_mu, _pop_cov
-    if _pop_mu is None or _pop_cov is None:
-        try:
-            params = scipy.io.loadmat(_params_path)
-            _pop_mu = np.ravel(params["pop_mu"])
-            _pop_cov = params["pop_cov"]
-        except:
-            _pop_mu = np.zeros(18)
-            _pop_cov = np.eye(18)
-    return _pop_mu, _pop_cov
 
 def aggd_features(imdata):
     imdata.shape = (len(imdata.flat),)
@@ -65,12 +50,14 @@ def aggd_features(imdata):
     N = (br - bl) * (gam2 / gam1)
     return (alpha, N, bl, br, left_mean_sqrt, right_mean_sqrt)
 
+
 def paired_product(new_im):
     shift1 = np.roll(new_im.copy(), 1, axis=1)
     shift2 = np.roll(new_im.copy(), 1, axis=0)
     shift3 = np.roll(np.roll(new_im.copy(), 1, axis=0), 1, axis=1)
     shift4 = np.roll(np.roll(new_im.copy(), 1, axis=0), -1, axis=1)
     return shift1 * new_im, shift2 * new_im, shift3 * new_im, shift4 * new_im
+
 
 def gen_gauss_window(lw, sigma):
     sd = np.float32(sigma)
@@ -88,6 +75,7 @@ def gen_gauss_window(lw, sigma):
         weights[ii] /= sum_
     return weights
 
+
 def compute_image_mscn_transform(image, C=1, avg_window=None, extend_mode='constant'):
     if avg_window is None:
         avg_window = gen_gauss_window(3, 7.0 / 6.0)
@@ -102,6 +90,7 @@ def compute_image_mscn_transform(image, C=1, avg_window=None, extend_mode='const
     scipy.ndimage.correlate1d(var_image, avg_window, 1, var_image, mode=extend_mode)
     var_image = np.sqrt(np.abs(var_image - mu_image ** 2))
     return (image - mu_image) / (var_image + C), var_image, mu_image
+
 
 def _niqe_extract_subband_feats(mscncoefs):
     alpha_m, N, bl, br, lsq, rsq = aggd_features(mscncoefs.copy())
@@ -118,6 +107,7 @@ def _niqe_extract_subband_feats(mscncoefs):
         alpha4, N4, bl4, bl4,
     ])
 
+
 def extract_on_patches(img, patch_size):
     h, w = img.shape
     patch_size = int(patch_size)
@@ -125,10 +115,9 @@ def extract_on_patches(img, patch_size):
     for j in range(0, h - patch_size + 1, patch_size):
         for i in range(0, w - patch_size + 1, patch_size):
             patches.append(img[j:j + patch_size, i:i + patch_size])
-    if len(patches) == 0:
-        return np.array([])
     patches = np.array(patches)
     return np.array([_niqe_extract_subband_feats(p) for p in patches])
+
 
 def get_patches_test_features(img, patch_size):
     h, w = np.shape(img)
@@ -145,38 +134,25 @@ def get_patches_test_features(img, patch_size):
     mscn2, _, _ = compute_image_mscn_transform(img2)
     mscn2 = mscn2.astype(np.float32)
     feats_lvl1 = extract_on_patches(mscn1, patch_size)
-    feats_lvl2 = extract_on_patches(mscn2, patch_size // 2)
-    if len(feats_lvl1) == 0 or len(feats_lvl2) == 0:
-        return np.array([])
+    feats_lvl2 = extract_on_patches(mscn2, patch_size / 2)
     return np.hstack((feats_lvl1, feats_lvl2))
 
+
 def niqe(inputImgData):
-    if inputImgData is None:
-        return 8.0
+    patch_size = 96
+    module_path = dirname(__file__)
+    params = scipy.io.loadmat(join(module_path, 'niqe_image_params.mat'))
+    pop_mu = np.ravel(params["pop_mu"])
+    pop_cov = params["pop_cov"]
     if inputImgData.ndim == 3:
         inputImgData = cv2.cvtColor(inputImgData, cv2.COLOR_BGR2GRAY)
-    patch_size = 96
     M, N = inputImgData.shape
-    min_size = patch_size * 2 + 1
-    if M < min_size or N < min_size:
-        scale = max(min_size / M, min_size / N)
-        new_w = int(N * scale)
-        new_h = int(M * scale)
-        inputImgData = cv2.resize(inputImgData, (new_w, new_h))
-        M, N = inputImgData.shape
+    assert M > (patch_size * 2 + 1), "Image too small, requires > 192x192"
+    assert N > (patch_size * 2 + 1), "Image too small, requires > 192x192"
     feats = get_patches_test_features(inputImgData, patch_size)
-    if len(feats) == 0:
-        return 8.0
-    pop_mu, pop_cov = _load_params()
     sample_mu = np.mean(feats, axis=0)
     sample_cov = np.cov(feats.T)
     X = sample_mu - pop_mu
     covmat = (pop_cov + sample_cov) / 2.0
-    covmat = covmat + np.eye(covmat.shape[0]) * 1e-6
-    try:
-        pinvmat = scipy.linalg.pinv(covmat)
-        score = float(np.sqrt(np.dot(np.dot(X, pinvmat), X)))
-        score = max(0, min(15, score))
-        return score
-    except:
-        return 8.0
+    pinvmat = scipy.linalg.pinv(covmat)
+    return float(np.sqrt(np.dot(np.dot(X, pinvmat), X)))

@@ -2,8 +2,6 @@ import math
 import numpy as np
 import cv2
 import scipy.special
-import joblib
-import os
 
 gamma_range = np.arange(0.2, 10, 0.001)
 _a = scipy.special.gamma(2.0 / gamma_range)
@@ -12,17 +10,6 @@ _b = scipy.special.gamma(1.0 / gamma_range)
 _c = scipy.special.gamma(3.0 / gamma_range)
 prec_gammas = _a / (_b * _c)
 
-_model_path = os.path.join(os.path.dirname(__file__), 'svr_brisque.joblib')
-_brisque_model = None
-
-def _get_model():
-    global _brisque_model
-    if _brisque_model is None:
-        try:
-            _brisque_model = joblib.load(_model_path)
-        except:
-            _brisque_model = None
-    return _brisque_model
 
 def aggd_features(imdata):
     imdata.shape = (len(imdata.flat),)
@@ -59,15 +46,15 @@ def aggd_features(imdata):
     N = (br - bl) * (gam2 / gam1)
     return (alpha, N, bl, br, left_mean_sqrt, right_mean_sqrt)
 
+
 def ggd_features(imdata):
     nr_gam = 1 / prec_gammas
     sigma_sq = np.var(imdata)
     E = np.mean(np.abs(imdata))
-    if E == 0:
-        return gamma_range[0], sigma_sq
-    rho = sigma_sq / (E ** 2)
+    rho = sigma_sq / E ** 2
     pos = np.argmin(np.abs(nr_gam - rho))
     return gamma_range[pos], sigma_sq
+
 
 def paired_product(new_im):
     shift1 = np.roll(new_im.copy(), 1, axis=1)
@@ -76,12 +63,13 @@ def paired_product(new_im):
     shift4 = np.roll(np.roll(new_im.copy(), 1, axis=0), -1, axis=1)
     return shift1 * new_im, shift2 * new_im, shift3 * new_im, shift4 * new_im
 
+
 def calculate_mscn(dis_image):
     dis_image = dis_image.astype(np.float32)
-    dis_image = np.maximum(dis_image, 0)
     ux = cv2.GaussianBlur(dis_image, (7, 7), 7 / 6)
     sigma = np.sqrt(np.abs(cv2.GaussianBlur(dis_image ** 2, (7, 7), 7 / 6) - ux * ux))
-    return (dis_image - ux) / (sigma + 1)
+    return (dis_image - ux) / (1 + sigma)
+
 
 def extract_brisque_feats(mscncoefs):
     alpha_m, sigma_sq = ggd_features(mscncoefs.copy())
@@ -98,33 +86,13 @@ def extract_brisque_feats(mscncoefs):
         alpha4, N4, lsq4 ** 2, rsq4 ** 2,
     ]
 
-def extract_brisque_features(im):
+
+def brisque(im):
     if len(im.shape) == 3:
         im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-    h, w = im.shape
-    if h < 100 or w < 100:
-        scale = max(100/h, 100/w)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-        im = cv2.resize(im, (new_w, new_h))
     mscncoefs = calculate_mscn(im)
     features1 = extract_brisque_feats(mscncoefs)
     low_res = cv2.resize(im, (0, 0), fx=0.5, fy=0.5)
     mscncoefs2 = calculate_mscn(low_res)
     features2 = extract_brisque_feats(mscncoefs2)
-    return np.array(features1 + features2).reshape(1, -1)
-
-def brisque(im):
-    if im is None:
-        return 50.0
-    features = extract_brisque_features(im)
-    model = _get_model()
-    if model is None:
-        fallback_score = min(80, max(20, float(np.mean(np.abs(features)) * 10)))
-        return fallback_score
-    try:
-        score = model.predict(features)[0]
-        score = max(0, min(100, score))
-        return float(score)
-    except:
-        return 50.0
+    return np.array(features1 + features2)
