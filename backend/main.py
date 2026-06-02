@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.api import auth, medical, patients, logs
+from app.models.migration import run_migration
+from app.models.database import engine, Base
 import os
 
 app = FastAPI(title="StegoShield API", version="1.0.0")
@@ -40,6 +42,11 @@ app.include_router(auth.router)
 app.include_router(medical.router)
 app.include_router(patients.router)
 app.include_router(logs.router)
+
+@app.on_event("startup")
+def startup_event():
+    Base.metadata.create_all(bind=engine)
+    run_migration()
 
 @app.get("/")
 async def root():
