@@ -6,154 +6,124 @@ import scipy.ndimage
 import scipy.io
 import scipy.linalg
 from os.path import dirname, join
+from functools import lru_cache
 
-gamma_range = np.arange(0.2, 10, 0.001)
-_a = scipy.special.gamma(2.0 / gamma_range)
-_a *= _a
-_b = scipy.special.gamma(1.0 / gamma_range)
-_c = scipy.special.gamma(3.0 / gamma_range)
-prec_gammas = _a / (_b * _c)
+# ── precompute gamma lookup once at import ──────────────────────────────────
+_gamma_range = np.arange(0.2, 10, 0.001)
+_prec_gammas = (scipy.special.gamma(2.0 / _gamma_range) ** 2) / (
+    scipy.special.gamma(1.0 / _gamma_range) * scipy.special.gamma(3.0 / _gamma_range)
+)
 
-def aggd_features(imdata: np.ndarray):
-    imdata = imdata.ravel()
-    imdata2 = imdata * imdata
-    left_data = imdata2[imdata < 0]
-    right_data = imdata2[imdata >= 0]
+def _make_avg_window(lw: int = 3, sigma: float = 7.0 / 6.0):
+    w = np.exp(-0.5 * np.arange(-lw, lw + 1) ** 2 / sigma ** 2)
+    return (w / w.sum()).tolist()
 
-    left_mean_sqrt = np.sqrt(left_data.mean()) if left_data.size > 0 else 0.0
-    right_mean_sqrt = np.sqrt(right_data.mean()) if right_data.size > 0 else 0.0
+_AVG_WINDOW = _make_avg_window()
 
-    gamma_hat = (left_mean_sqrt / right_mean_sqrt) if right_mean_sqrt != 0 else np.inf
 
-    imdata2_mean = imdata2.mean()
-    if imdata2_mean != 0:
-        r_hat = (np.abs(imdata).mean() ** 2) / imdata2_mean
-    else:
-        r_hat = np.inf
-
-    rhat_norm = r_hat * (
-        ((math.pow(gamma_hat, 3) + 1) * (gamma_hat + 1))
-        / math.pow(math.pow(gamma_hat, 2) + 1, 2)
-    )
-
-    pos = np.argmin((prec_gammas - rhat_norm) ** 2)
-    alpha = gamma_range[pos]
-
-    gam1 = scipy.special.gamma(1.0 / alpha)
-    gam2 = scipy.special.gamma(2.0 / alpha)
-    gam3 = scipy.special.gamma(3.0 / alpha)
-
-    aggdratio = np.sqrt(gam1) / np.sqrt(gam3)
-    bl = aggdratio * left_mean_sqrt
-    br = aggdratio * right_mean_sqrt
-    N = (br - bl) * (gam2 / gam1)
-
-    return alpha, N, bl, br, left_mean_sqrt, right_mean_sqrt
-
-def paired_product(new_im: np.ndarray):
-    shift1 = np.roll(new_im, 1, axis=1)
-    shift2 = np.roll(new_im, 1, axis=0)
-    shift3 = np.roll(np.roll(new_im, 1, axis=0), 1, axis=1)
-    shift4 = np.roll(np.roll(new_im, 1, axis=0), -1, axis=1)
-    return shift1 * new_im, shift2 * new_im, shift3 * new_im, shift4 * new_im
-
-def gen_gauss_window(lw: int, sigma: float):
-    sd = float(sigma)
-    lw = int(lw)
-    weights = [0.0] * (2 * lw + 1)
-    weights[lw] = 1.0
-    sum_ = 1.0
-    sd2 = sd * sd
-    for ii in range(1, lw + 1):
-        tmp = math.exp(-0.5 * ii * ii / sd2)
-        weights[lw + ii] = tmp
-        weights[lw - ii] = tmp
-        sum_ += 2.0 * tmp
-    return [w / sum_ for w in weights]
-
-def compute_image_mscn_transform(image: np.ndarray, C: float = 1.0,
-                                  avg_window=None, extend_mode: str = 'constant'):
-    if avg_window is None:
-        avg_window = gen_gauss_window(3, 7.0 / 6.0)
-    assert image.ndim == 2
-    h, w = image.shape
-    mu_image = np.zeros((h, w), dtype=np.float32)
-    var_image = np.zeros((h, w), dtype=np.float32)
-    image_f = image.astype(np.float32)
-
-    scipy.ndimage.correlate1d(image_f, avg_window, 0, mu_image, mode=extend_mode)
-    scipy.ndimage.correlate1d(mu_image, avg_window, 1, mu_image, mode=extend_mode)
-    scipy.ndimage.correlate1d(image_f ** 2, avg_window, 0, var_image, mode=extend_mode)
-    scipy.ndimage.correlate1d(var_image, avg_window, 1, var_image, mode=extend_mode)
-
-    var_image = np.sqrt(np.abs(var_image - mu_image ** 2))
-    return (image_f - mu_image) / (var_image + C), var_image, mu_image
-
-def _niqe_extract_subband_feats(mscncoefs: np.ndarray) -> np.ndarray:
-    alpha_m, N_m, bl_m, br_m, _, _ = aggd_features(mscncoefs.copy())
-
-    pps1, pps2, pps3, pps4 = paired_product(mscncoefs)
-
-    alpha1, N1, bl1, br1, _, _ = aggd_features(pps1)
-    alpha2, N2, bl2, br2, _, _ = aggd_features(pps2)
-    alpha3, N3, bl3, br3, _, _ = aggd_features(pps3)
-    alpha4, N4, bl4, br4, _, _ = aggd_features(pps4)
-
-    return np.array([
-        alpha_m, (bl_m + br_m) / 2.0,
-        alpha1, N1, bl1, br1,
-        alpha2, N2, bl2, br2,
-        alpha3, N3, bl3, br3,
-        alpha4, N4, bl4, br4,
-    ])
-
-def extract_on_patches(img: np.ndarray, patch_size: int) -> np.ndarray:
-    h, w = img.shape
-    ps = int(patch_size)
-    patches = [
-        img[j:j + ps, i:i + ps]
-        for j in range(0, h - ps + 1, ps)
-        for i in range(0, w - ps + 1, ps)
-    ]
-    return np.array([_niqe_extract_subband_feats(p) for p in patches])
-
-def get_patches_test_features(img: np.ndarray, patch_size: int) -> np.ndarray:
-    h, w = img.shape
-    hoffset = h % patch_size
-    woffset = w % patch_size
-    if hoffset > 0:
-        img = img[:-hoffset, :]
-    if woffset > 0:
-        img = img[:, :-woffset]
-
-    img = img.astype(np.float32)
-    img2 = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-
-    mscn1, _, _ = compute_image_mscn_transform(img)
-    mscn2, _, _ = compute_image_mscn_transform(img2)
-
-    feats1 = extract_on_patches(mscn1.astype(np.float32), patch_size)
-    feats2 = extract_on_patches(mscn2.astype(np.float32), patch_size // 2)
-
-    return np.hstack((feats1, feats2))
-
-def niqe(inputImgData: np.ndarray) -> float:
-    patch_size = 96
-    module_path = dirname(__file__)
+@lru_cache(maxsize=1)
+def _load_params(module_path: str):
     params = scipy.io.loadmat(join(module_path, 'niqe_image_params.mat'))
     pop_mu = np.ravel(params["pop_mu"])
     pop_cov = params["pop_cov"]
+    return pop_mu, pop_cov
+
+
+def _compute_mscn(image: np.ndarray, C: float = 1.0):
+    image_f = image.astype(np.float32)
+    mu = np.empty_like(image_f)
+    var = np.empty_like(image_f)
+    scipy.ndimage.correlate1d(image_f,           _AVG_WINDOW, 0, mu,  mode='constant')
+    scipy.ndimage.correlate1d(mu,                _AVG_WINDOW, 1, mu,  mode='constant')
+    scipy.ndimage.correlate1d(image_f * image_f, _AVG_WINDOW, 0, var, mode='constant')
+    scipy.ndimage.correlate1d(var,               _AVG_WINDOW, 1, var, mode='constant')
+    np.subtract(var, mu * mu, out=var)
+    np.abs(var, out=var)
+    np.sqrt(var, out=var)
+    return (image_f - mu) / (var + C), var, mu
+
+
+def _aggd_features(imdata: np.ndarray):
+    flat = imdata.ravel()
+    flat2 = flat * flat
+    left_mask = flat < 0
+    lsq = math.sqrt(float(flat2[left_mask].mean())) if left_mask.any() else 0.0
+    rsq = math.sqrt(float(flat2[~left_mask].mean())) if (~left_mask).any() else 0.0
+
+    gamma_hat = (lsq / rsq) if rsq != 0 else math.inf
+    mean2 = float(flat2.mean())
+    r_hat = (float(np.mean(np.abs(flat))) ** 2) / mean2 if mean2 != 0 else math.inf
+
+    rhat_norm = r_hat * (
+        (gamma_hat ** 3 + 1) * (gamma_hat + 1) / (gamma_hat ** 2 + 1) ** 2
+    )
+    pos = int(np.argmin((_prec_gammas - rhat_norm) ** 2))
+    alpha = float(_gamma_range[pos])
+
+    g1 = scipy.special.gamma(1.0 / alpha)
+    g2 = scipy.special.gamma(2.0 / alpha)
+    g3 = scipy.special.gamma(3.0 / alpha)
+    ratio = math.sqrt(g1 / g3)
+    N = (ratio * rsq - ratio * lsq) * (g2 / g1)
+    return alpha, N, ratio * lsq, ratio * rsq
+
+
+def _subband_feats(mscn: np.ndarray) -> np.ndarray:
+    a_m, N_m, bl_m, br_m = _aggd_features(mscn)
+
+    h  = np.roll(mscn,  1, axis=1) * mscn
+    v  = np.roll(mscn,  1, axis=0) * mscn
+    d1 = np.roll(np.roll(mscn, 1, axis=0),  1, axis=1) * mscn
+    d2 = np.roll(np.roll(mscn, 1, axis=0), -1, axis=1) * mscn
+
+    out = [a_m, (bl_m + br_m) / 2.0]
+    for pp in (h, v, d1, d2):
+        a, N, bl, br = _aggd_features(pp)
+        out += [a, N, bl, br]
+    return np.array(out, dtype=np.float64)
+
+
+def _patches_feats(img: np.ndarray, ps: int) -> np.ndarray:
+    h, w = img.shape
+    img = img[:h - h % ps, :w - w % ps].astype(np.float32)
+    img2 = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+
+    mscn1, _, _ = _compute_mscn(img)
+    mscn2, _, _ = _compute_mscn(img2)
+
+    ps2 = ps // 2
+    h1, w1 = mscn1.shape
+    h2, w2 = mscn2.shape
+
+    f1 = np.array([
+        _subband_feats(mscn1[r:r+ps, c:c+ps])
+        for r in range(0, h1 - ps + 1, ps)
+        for c in range(0, w1 - ps + 1, ps)
+    ])
+    f2 = np.array([
+        _subband_feats(mscn2[r:r+ps2, c:c+ps2])
+        for r in range(0, h2 - ps2 + 1, ps2)
+        for c in range(0, w2 - ps2 + 1, ps2)
+    ])
+
+    n = min(len(f1), len(f2))
+    return np.hstack((f1[:n], f2[:n]))
+
+
+def niqe(inputImgData: np.ndarray) -> float:
+    PS = 96
+    module_path = dirname(__file__)
+    pop_mu, pop_cov = _load_params(module_path)
 
     if inputImgData.ndim == 3:
         inputImgData = cv2.cvtColor(inputImgData, cv2.COLOR_BGR2GRAY)
 
     M, N = inputImgData.shape
-    assert M > (patch_size * 2 + 1), \
-        f"Image too small ({M}×{N}), requires > {patch_size * 2 + 1}×{patch_size * 2 + 1}"
-    assert N > (patch_size * 2 + 1), \
-        f"Image too small ({M}×{N}), requires > {patch_size * 2 + 1}×{patch_size * 2 + 1}"
+    min_dim = PS * 2 + 1
+    assert M > min_dim and N > min_dim, \
+        f"Image too small ({M}×{N}), requires > {min_dim}×{min_dim}"
 
-    feats = get_patches_test_features(inputImgData, patch_size)
+    feats = _patches_feats(inputImgData, PS)
     sample_mu = np.mean(feats, axis=0)
     sample_cov = np.cov(feats.T)
 
@@ -161,5 +131,4 @@ def niqe(inputImgData: np.ndarray) -> float:
     covmat = (pop_cov + sample_cov) / 2.0
     pinvmat = scipy.linalg.pinv(covmat)
 
-    score = float(np.sqrt(np.dot(np.dot(X, pinvmat), X)))
-    return max(0.0, score)
+    return float(max(0.0, math.sqrt(float(X @ pinvmat @ X))))

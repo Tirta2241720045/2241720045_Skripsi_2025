@@ -1,132 +1,129 @@
 import numpy as np
 import cv2
 
+
 def _calculate_mscn(dis_image: np.ndarray) -> np.ndarray:
-    dis_image = dis_image.astype(np.float64)
+    dis_image = dis_image.astype(np.float32)
     ux = cv2.GaussianBlur(dis_image, (7, 7), 7.0 / 6.0)
-    sigma = np.sqrt(np.abs(
-        cv2.GaussianBlur(dis_image ** 2, (7, 7), 7.0 / 6.0) - ux * ux
-    ))
+    sigma = np.sqrt(np.abs(cv2.GaussianBlur(dis_image * dis_image, (7, 7), 7.0 / 6.0) - ux * ux))
     return (dis_image - ux) / (1.0 + sigma)
 
-def _segment_edge(blockEdge: np.ndarray, nSegments: int,
-                  blockSize: int, windowSize: int) -> np.ndarray:
-    segments = np.zeros((nSegments, windowSize))
-    ws = windowSize
-    for i in range(nSegments):
-        segments[i, :] = blockEdge[i:ws]
-        if ws <= (blockSize + 1):
-            ws += 1
-    return segments
 
-def _notice_dist_criterion(Block: np.ndarray, nSegments: int, blockSize: int,
-                            windowSize: int, blockImpairedThreshold: float,
-                            N: int) -> int:
-    edges = [
-        Block[0, :],
-        Block[N - 1, :],
-        Block[:, N - 1],
-        Block[:, 0],
-    ]
+def _extract_blocks(arr: np.ndarray, block_size: int) -> np.ndarray:
+    """Extract non-overlapping blocks via stride tricks — zero copy."""
+    H, W = arr.shape
+    bH = H // block_size
+    bW = W // block_size
+    s0, s1 = arr.strides
+    shape = (bH, bW, block_size, block_size)
+    strides = (s0 * block_size, s1 * block_size, s0, s1)
+    return np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides)
+
+
+def _segment_edge_std(edge: np.ndarray, n_segments: int, window_size: int) -> np.ndarray:
+    """Compute std of all sliding windows along edge in one vectorized pass."""
+    idx = np.arange(window_size)[None, :] + np.arange(n_segments)[:, None]
+    segments = edge[idx]
+    return np.std(segments, axis=1)
+
+
+def _block_impaired(block: np.ndarray, n_segments: int, block_size: int,
+                    window_size: int, threshold: float) -> bool:
+    edges = (block[0, :], block[-1, :], block[:, -1], block[:, 0])
     for edge in edges:
-        segs = _segment_edge(edge, nSegments, blockSize, windowSize)
-        std_dev = np.std(segs, axis=1)
-        if np.any(std_dev < blockImpairedThreshold):
-            return 1
-    return 0
+        if np.any(_segment_edge_std(edge, n_segments, window_size) < threshold):
+            return True
+    return False
 
-def _center_sur_dev(Block: np.ndarray, blockSize: int) -> float:
-    c1 = (blockSize + 1) // 2 - 1
+
+def _center_sur_std_ratio(block: np.ndarray, bs: int) -> float:
+    c1 = (bs + 1) // 2 - 1
     c2 = c1 + 1
-    center = np.concatenate([Block[:, c1], Block[:, c2]])
-    surround = np.delete(np.delete(Block, c1, axis=1), c1, axis=1)
-    c_std = np.std(center)
-    s_std = np.std(surround)
-    return c_std / s_std if s_std > 0 else 0.0
+    center = np.concatenate([block[:, c1], block[:, c2]])
+    mask = np.ones(block.shape[1], dtype=bool)
+    mask[c1] = False
+    surround = block[:, mask].ravel()
+    s_std = surround.std()
+    return center.std() / s_std if s_std > 0 else 0.0
 
-def _noise_criterion(Block: np.ndarray, blockSize: int,
-                     blockVar: float):
-    blockSigma = np.sqrt(blockVar)
-    cenSurDev = _center_sur_dev(Block, blockSize)
-    denom = max(blockSigma, cenSurDev)
-    blockBeta = abs(blockSigma - cenSurDev) / denom if denom > 0 else 0.0
-    return blockSigma, blockBeta
 
 def piqe(im: np.ndarray):
-    blockSize = 16
-    activityThreshold = 0.1
-    blockImpairedThreshold = 0.1
-    windowSize = 6
-    nSegments = blockSize - windowSize + 1
+    BLOCK = 16
+    ACT_THRESH = 0.1
+    IMP_THRESH = 0.1
+    WIN = 6
+    N_SEG = BLOCK - WIN + 1
     NHSA = 0
 
     if im.ndim == 3:
         im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
 
-    originalSize = im.shape
-    rows, columns = originalSize
+    orig_shape = im.shape
+    rows, cols = orig_shape
+    rpad = (-rows % BLOCK)
+    cpad = (-cols % BLOCK)
+    isPadded = rpad > 0 or cpad > 0
 
-    rowsPad = rows % blockSize
-    columnsPad = columns % blockSize
-    isPadded = False
+    if isPadded:
+        im = np.pad(im, ((0, rpad), (0, cpad)), mode='edge')
 
-    if rowsPad > 0 or columnsPad > 0:
-        rowsPad = (blockSize - rowsPad) if rowsPad > 0 else 0
-        columnsPad = (blockSize - columnsPad) if columnsPad > 0 else 0
-        isPadded = True
+    imnorm = _calculate_mscn(im)
 
-    im_padded = np.pad(im, ((0, rowsPad), (0, columnsPad)), mode='edge')
-    imnorm = _calculate_mscn(im_padded)
-
-    NoticeableArtifactsMask = np.zeros(imnorm.shape)
-    NoiseMask = np.zeros(imnorm.shape)
-    ActivityMask = np.zeros(imnorm.shape)
+    NoticeableArtifactsMask = np.zeros(imnorm.shape, dtype=np.float32)
+    NoiseMask = np.zeros(imnorm.shape, dtype=np.float32)
+    ActivityMask = np.zeros(imnorm.shape, dtype=np.float32)
     BlockScores = []
 
-    for i in range(0, imnorm.shape[0] - blockSize + 1, blockSize):
-        for j in range(0, imnorm.shape[1] - blockSize + 1, blockSize):
-            WNDC = 0
-            WNC = 0
-            Block = imnorm[i:i + blockSize, j:j + blockSize]
-            blockVar = float(np.var(Block))
+    # stride-trick block view: shape (bH, bW, BLOCK, BLOCK)
+    blocks = _extract_blocks(imnorm, BLOCK)
+    bH, bW = blocks.shape[:2]
 
-            if blockVar > activityThreshold:
-                ActivityMask[i:i + blockSize, j:j + blockSize] = 1
-                NHSA += 1
+    for bi in range(bH):
+        for bj in range(bW):
+            block = blocks[bi, bj]          # (BLOCK, BLOCK) view
+            block_var = float(np.var(block))
 
-                blockImpaired = _notice_dist_criterion(
-                    Block, nSegments, blockSize - 1,
-                    windowSize, blockImpairedThreshold, blockSize
-                )
-                if blockImpaired:
-                    WNDC = 1
-                    NoticeableArtifactsMask[i:i + blockSize, j:j + blockSize] = blockVar
+            if block_var <= ACT_THRESH:
+                continue
 
-                blockSigma, blockBeta = _noise_criterion(Block, blockSize - 1, blockVar)
-                if blockSigma > 2 * blockBeta:
-                    WNC = 1
-                    NoiseMask[i:i + blockSize, j:j + blockSize] = blockVar
+            ri, ci = bi * BLOCK, bj * BLOCK
+            ActivityMask[ri:ri+BLOCK, ci:ci+BLOCK] = 1
+            NHSA += 1
+            WNDC = WNC = 0
 
-                score_val = WNDC * (1 - blockVar) ** 2 + WNC * blockVar ** 2
-                if score_val > 0:
-                    BlockScores.append(score_val)
+            if _block_impaired(block, N_SEG, BLOCK - 1, WIN, IMP_THRESH):
+                WNDC = 1
+                NoticeableArtifactsMask[ri:ri+BLOCK, ci:ci+BLOCK] = block_var
 
-    if NHSA == 0 or len(BlockScores) == 0:
+            block_sigma = float(np.sqrt(block_var))
+            csd = _center_sur_std_ratio(block, BLOCK - 1)
+            denom = max(block_sigma, csd)
+            block_beta = abs(block_sigma - csd) / denom if denom > 0 else 0.0
+
+            if block_sigma > 2 * block_beta:
+                WNC = 1
+                NoiseMask[ri:ri+BLOCK, ci:ci+BLOCK] = block_var
+
+            score_val = WNDC * (1 - block_var) ** 2 + WNC * block_var ** 2
+            if score_val > 0:
+                BlockScores.append(score_val)
+
+    if NHSA == 0 or not BlockScores:
         Score = 0.0
     else:
         BlockScores.sort()
-        lowSum = sum(BlockScores[:max(1, int(0.1 * len(BlockScores)))])
+        n_low = max(1, int(0.1 * len(BlockScores)))
+        low_sum = sum(BlockScores[:n_low])
         total = sum(BlockScores)
         if total > 0:
-            Scores = [(s * 10 * lowSum) / total for s in BlockScores]
+            Scores = [(s * 10 * low_sum) / total for s in BlockScores]
         else:
             Scores = BlockScores[:]
-        C = 1
-        Score = ((sum(Scores) + C) / (C + NHSA)) * 100
+        Score = ((sum(Scores) + 1) / (1 + NHSA)) * 100
 
     if isPadded:
-        NoticeableArtifactsMask = NoticeableArtifactsMask[:originalSize[0], :originalSize[1]]
-        NoiseMask = NoiseMask[:originalSize[0], :originalSize[1]]
-        ActivityMask = ActivityMask[:originalSize[0], :originalSize[1]]
+        NoticeableArtifactsMask = NoticeableArtifactsMask[:orig_shape[0], :orig_shape[1]]
+        NoiseMask = NoiseMask[:orig_shape[0], :orig_shape[1]]
+        ActivityMask = ActivityMask[:orig_shape[0], :orig_shape[1]]
 
     return float(Score), NoticeableArtifactsMask, NoiseMask, ActivityMask
