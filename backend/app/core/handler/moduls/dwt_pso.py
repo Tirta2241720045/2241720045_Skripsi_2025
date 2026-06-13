@@ -126,12 +126,16 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     }
 
 
-def extract(stego_img: Image.Image, payload_text: str) -> dict:
+def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     _, (_, _, cD) = pywt.dwt2(img_gray.astype(np.float64), "haar")
+
+    # 🔥 Gunakan payload_text untuk menentukan n_bits (seperti kode lama)
+    if payload_text is None:
+        raise ValueError("DWT-PSO membutuhkan teks asli untuk proses ekstraksi")
 
     encoded = _ldpc_encode(payload_text.encode("utf-8"))
     bits = np.unpackbits(np.frombuffer(encoded, dtype=np.uint8))
