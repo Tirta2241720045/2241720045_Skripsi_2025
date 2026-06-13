@@ -9,6 +9,7 @@ import {
   AccTxtResult,
 } from '../../api/medical';
 import Navbar from '../../components/shared/Navbar';
+import ToolsPanel from '../../components/shared/ToolsPanel';
 import '../../styles/DashboardMedical.css';
 import { downloadStegoReport, downloadExtractReport } from '../../components/shared/pdfReport';
 
@@ -908,6 +909,7 @@ const DashboardDoctor = () => {
   return (
     <div className="dmc-root">
       <Navbar userFullName={user.full_name} userRole={user.role} />
+      <ToolsPanel />
       
       {/* Lightbox */}
       {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}

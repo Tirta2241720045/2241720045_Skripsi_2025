@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Navbar from '../../components/shared/Navbar';
+import ToolsPanel from '../../components/shared/ToolsPanel';
 import { getAllPatients, createPatient, updatePatient, deletePatient, PatientResponse, Gender } from '../../api/patients';
-import { getMedicalRecordsByPatient, uploadMedicalData, deleteMedicalRecord, MedicalRecordItem, LayerMetrics, AccTxtResult } from '../../api/medical';
+import { getMedicalRecordsByPatient, uploadMedicalData, deleteMedicalRecord, MedicalRecordItem, LayerMetrics, AccTxtResult, StegoMethod } from '../../api/medical';
 import '../../styles/DashboardMedical.css';
 import { downloadStaffReport } from '../../components/shared/pdfReport';
 
@@ -42,6 +43,19 @@ const DEFAULT_PROCESS_STEPS: ProcessStep[] = [
 ];
 
 const noImg = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="250" height="250"%3E%3Crect fill="%23eef0f4" width="250" height="250"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23b0b8c8" font-size="12"%3ENo Image%3C/text%3E%3C/svg%3E';
+
+// Helper: ambil metode yang dipilih dari localStorage
+const getSelectedMethod = (): StegoMethod => {
+  try {
+    const stored = localStorage.getItem('selectedStegoMethod') as StegoMethod;
+    if (stored && ['stegoshield', 'dwt_pso', 'ebs3', 'ebs5', 'ebs9'].includes(stored)) {
+      return stored;
+    }
+  } catch {
+    // localStorage error
+  }
+  return 'stegoshield';
+};
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -282,17 +296,14 @@ const Lightbox = ({ src, onClose }: { src: string; onClose: () => void }) => (
 const validateImageFile = async (file: File, expectedType: 'color' | 'grayscale'): Promise<FileValidation> => {
   const errors: string[] = [];
   
-  // Check file type
   if (!file.type.match(/image\/(png|jpeg|jpg)/)) {
     errors.push('Format must be PNG or JPEG/JPG');
   }
   
-  // Check file size
   if (file.size > 10 * 1024 * 1024) {
     errors.push(`Too large (max 10MB) — ${(file.size / 1024 / 1024).toFixed(2)}MB`);
   }
 
-  // Load and analyze image
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -663,12 +674,14 @@ const DashboardStaff = () => {
     try {
       const fd = new FormData();
       fd.append('patient_id', targetPatientId.toString());
+      // 🔥 AMBIL METODE DARI LOCALSTORAGE (ToolsPanel)
+      fd.append('method', getSelectedMethod());
       fd.append('medical_data', diagnosisFile, diagnosisFile.name);
       fd.append('mri_image', mriImageFile);
       fd.append('patient_photo', patientPhotoFile);
       
       const [result] = await Promise.all([uploadMedicalData(fd), runProcessSteps()]);
-      showNotification(`Record #${result.record_id} saved successfully`, 'success');
+      showNotification(`Record #${result.record_id} saved successfully with method ${result.method.toUpperCase()}`, 'success');
       
       await loadMedicalRecords(targetPatientId);
       const updated = await getMedicalRecordsByPatient(targetPatientId);
@@ -1000,6 +1013,9 @@ const DashboardStaff = () => {
       <div className="dmc-add-record-header">
         <div className="dmc-add-record-title">
           <span>Add New Medical Record</span>
+          <span style={{ fontSize: 11, fontWeight: 'normal', marginLeft: 8, color: '#667eea' }}>
+            (Method: {getSelectedMethod().toUpperCase()})
+          </span>
         </div>
       </div>
       <div className="dmc-add-record-body">
@@ -1016,7 +1032,7 @@ const DashboardStaff = () => {
             {isUploading ? (
               <><span className="dmc-spin" />Processing...</>
             ) : (
-              <>🚀 Upload & Encrypt</>
+              <>🚀 Upload & Encrypt ({getSelectedMethod().toUpperCase()})</>
             )}
           </button>
         </div>
@@ -1181,6 +1197,7 @@ const DashboardStaff = () => {
   return (
     <div className="dmc-root">
       <Navbar userFullName={user.full_name} userRole={user.role} />
+      <ToolsPanel />
       
       {/* Lightbox */}
       {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
@@ -1442,7 +1459,7 @@ const DashboardStaff = () => {
                                   {isUploading ? (
                                     <><span className="dmc-spin" />Processing...</>
                                   ) : (
-                                    <>🚀 Upload & Encrypt</>
+                                    <>🚀 Upload & Encrypt ({getSelectedMethod().toUpperCase()})</>
                                   )}
                                 </button>
                               </div>

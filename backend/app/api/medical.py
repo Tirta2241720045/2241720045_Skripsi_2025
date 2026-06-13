@@ -6,8 +6,6 @@ from app.api.auth import require_staff, require_doctor, require_staff_or_doctor
 import os
 import time
 import numpy as np
-from app.core.aes_handler import AESHandler
-from app.core.lsb_handler import LSBHandler
 from PIL import Image
 import io
 import unicodedata
@@ -17,10 +15,9 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-router = APIRouter(prefix="/medical", tags=["Medical"])
+from app.core.method_router import route_embed, route_extract, SUPPORTED_METHODS
 
-AES_KEY = os.getenv("AES_KEY", "SECRET_KEY_STEGOSHIELD_2026")
-aes_handler = AESHandler(AES_KEY)
+router = APIRouter(prefix="/medical", tags=["Medical"])
 
 DIR_ORIGINAL = os.path.join("files", "original")
 DIR_EMBEDDING = os.path.join("files", "embedding")
@@ -33,7 +30,6 @@ for d in [DIR_ORIGINAL, DIR_EMBEDDING, DIR_EXTRACT, DIR_VISUAL, DIR_CSV]:
 
 DOCUMENTATION_XLSX_PATH = os.path.join(DIR_CSV, "documentation.xlsx")
 
-MRI_BORDER_RATIO = 0.15
 PHOTO_MAX_SIDE = 2560
 
 _HEADER_FILL = PatternFill("solid", start_color="2F5496")
@@ -53,6 +49,7 @@ _LAYER_HEADERS = [
 
 _TIMING_HEADERS = [
     "timestamp", "record_id", "patient_id",
+    "method",
     "mri_resolution", "photo_resolution", "txt_size_kb",
     "embed_layer1_seconds", "embed_layer2_seconds", "embed_total_seconds",
     "extract_layer1_seconds", "extract_layer2_seconds", "extract_total_seconds",
@@ -132,6 +129,7 @@ def _append_layer_row(ws, ts: str, record_id: int, patient_id: int,
 def _write_embed_to_xlsx(
     record_id: int,
     patient_id: int,
+    method: str,
     mri_resolution: str,
     photo_resolution: str,
     txt_size_kb: float,
@@ -151,6 +149,7 @@ def _write_embed_to_xlsx(
     _append_layer_row(ws2, ts, record_id, patient_id, metrics_l2_embed, None)
     timing_row = [
         ts, record_id, patient_id,
+        method,
         mri_resolution, photo_resolution, _safe_float(txt_size_kb),
         _safe_float(embed_layer1_seconds),
         _safe_float(embed_layer2_seconds),
@@ -279,23 +278,6 @@ def _save_image(img: Image.Image, path: str, compress_level: int = 0) -> None:
     img.save(path, format='PNG', compress_level=compress_level)
 
 
-def _pil_to_bytes(img: Image.Image) -> bytes:
-    buf = io.BytesIO()
-    img.save(buf, format='PNG', compress_level=1)
-    return buf.getvalue()
-
-
-def _pack_encrypted(encrypted: dict) -> bytes:
-    return f"{encrypted['ciphertext']}::{encrypted['iv']}::{encrypted['mac']}".encode('utf-8')
-
-
-def _unpack_encrypted(raw: str) -> Tuple[str, str, str]:
-    parts = raw.split("::", 2)
-    if len(parts) != 3:
-        raise ValueError("Format data tidak valid: diharapkan ciphertext::iv::mac")
-    return parts[0], parts[1], parts[2]
-
-
 def _resize_photo_cover(img: Image.Image, max_side: int = PHOTO_MAX_SIDE) -> Image.Image:
     w, h = img.size
     longest = max(w, h)
@@ -357,12 +339,19 @@ def _calculate_acctxt(original_text: str, recovered_text: str) -> dict:
 @router.post("/upload")
 async def upload_medical_data(
     patient_id: int = Form(...),
+    method: str = Form("stegoshield"),
     medical_data: UploadFile = File(...),
     mri_image: UploadFile = File(...),
     patient_photo: UploadFile = File(...),
     current_user: User = Depends(require_staff),
     db: Session = Depends(get_db)
 ):
+    if method not in SUPPORTED_METHODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Metode tidak valid: '{method}'. Pilih salah satu: {', '.join(SUPPORTED_METHODS)}"
+        )
+
     patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
     if not patient:
         write_log(db, current_user.user_id, f"ERROR|UPLOAD_MEDICAL_FAILED: patient_id={patient_id}, reason=patient_not_found")
@@ -389,77 +378,53 @@ async def upload_medical_data(
         raise HTTPException(status_code=400, detail=f"File gambar tidak valid: {str(e)}")
 
     img_photo = _resize_photo_cover(img_photo.convert('RGB'))
+    img_mri_gray = img_mri.convert('L')
 
     mri_w, mri_h = img_mri.size
     photo_w, photo_h = img_photo.size
-
-    if mri_w > photo_w or mri_h > photo_h:
-        raise HTTPException(status_code=400, detail=f"Ukuran MRI ({mri_w}x{mri_h}) tidak boleh lebih besar dari foto pasien ({photo_w}x{photo_h}).")
 
     timestamp = int(time.time() * 1000)
     prefix = f"{patient_id}_{timestamp}"
 
     orig_photo_path = os.path.join(DIR_ORIGINAL, f"photo_{prefix}.png")
-    orig_mri_path = os.path.join(DIR_ORIGINAL, f"mri_{prefix}.png")
-    orig_txt_path = os.path.join(DIR_ORIGINAL, f"medical_{prefix}.txt")
-    stego_out_path = os.path.join(DIR_EMBEDDING, f"stego_{prefix}.png")
-
-    img_mri_gray = img_mri.convert('L')
-    img_photo_rgb = img_photo
+    orig_mri_path   = os.path.join(DIR_ORIGINAL, f"mri_{prefix}.png")
+    orig_txt_path   = os.path.join(DIR_ORIGINAL, f"medical_{prefix}.txt")
+    stego_out_path  = os.path.join(DIR_EMBEDDING, f"stego_{prefix}.png")
 
     try:
-        img_photo_rgb.save(orig_photo_path, format='PNG', compress_level=9)
+        img_photo.save(orig_photo_path, format='PNG', compress_level=9)
         img_mri_gray.save(orig_mri_path, format='PNG', compress_level=0)
 
         with open(orig_txt_path, "w", encoding="utf-8", newline='\n') as f:
             f.write(txt_content)
 
-        encrypted = aes_handler.encrypt(txt_content)
-        data_to_embed = _pack_encrypted(encrypted)
+        # Route ke handler yang dipilih
+        result = route_embed(method, img_mri_gray, img_photo, txt_content)
 
-        roni_mri_capacity = LSBHandler.get_roni_capacity_border(mri_h, mri_w, MRI_BORDER_RATIO)
-        roni_mri_bytes = (roni_mri_capacity // 8) - 4
-
-        if len(data_to_embed) > roni_mri_bytes:
-            raise HTTPException(status_code=400, detail=f"Data terlalu besar. Kapasitas RONI MRI: {roni_mri_bytes} bytes.")
-
-        t1_start = time.perf_counter()
-        mri_stego_img = LSBHandler.embed_to_grayscale_geometric(img_mri_gray, data_to_embed, border_ratio=MRI_BORDER_RATIO)
-        time_layer1 = round(time.perf_counter() - t1_start, 6)
-
-        mri_stego_bytes = _pil_to_bytes(mri_stego_img)
-        photo_full_capacity = (photo_h * photo_w * 3 // 8) - 4
-
-        if len(mri_stego_bytes) > photo_full_capacity:
-            raise HTTPException(status_code=400, detail=f"MRI stego terlalu besar. Kapasitas foto: {photo_full_capacity} bytes.")
-
-        t2_start = time.perf_counter()
-        stego_img = LSBHandler.embed_to_rgb_full(img_photo_rgb, mri_stego_img)
-        time_layer2 = round(time.perf_counter() - t2_start, 6)
-
-        time_embed_total = round(time_layer1 + time_layer2, 6)
+        stego_img   = result["stego_img"]
+        time_layer1 = result["timing"]["layer1_seconds"]
+        time_layer2 = result["timing"]["layer2_seconds"]
+        time_total  = result["timing"]["total_seconds"]
+        metrics_l1  = result["metrics_l1"]
+        metrics_l2  = result["metrics_l2"]
 
         stego_img.save(stego_out_path, format='PNG', compress_level=9)
 
-        metrics_l1 = LSBHandler.calculate_metrics(img_mri_gray, mri_stego_img, mode='L')
-        metrics_l2 = LSBHandler.calculate_metrics(img_photo_rgb, stego_img, mode='RGB')
-        nriqa_l1 = LSBHandler.calculate_nriqa_metrics(mri_stego_img, mode='L')
-        nriqa_l2 = LSBHandler.calculate_nriqa_metrics(stego_img, mode='RGB')
-
         file_sizes = {
-            "original_txt_kb": _file_size_kb(orig_txt_path),
-            "original_mri_kb": _file_size_kb(orig_mri_path),
+            "original_txt_kb":   _file_size_kb(orig_txt_path),
+            "original_mri_kb":   _file_size_kb(orig_mri_path),
             "original_photo_kb": _file_size_kb(orig_photo_path),
-            "stego_kb": _file_size_kb(stego_out_path),
+            "stego_kb":          _file_size_kb(stego_out_path),
         }
 
         db_record = MedicalRecord(
             patient_id=patient_id,
+            method=method,
             medical_data_path=_normalize_path(orig_txt_path),
             photo_path=_normalize_path(orig_photo_path),
             mri_path=_normalize_path(orig_mri_path),
             stego_photo_path=_normalize_path(stego_out_path),
-            embed_time_seconds=time_embed_total,
+            embed_time_seconds=time_total,
         )
         db.add(db_record)
         db.commit()
@@ -470,46 +435,47 @@ async def upload_medical_data(
             layer1_mse=metrics_l1['mse'],
             layer1_psnr=metrics_l1['psnr'],
             layer1_ssim=metrics_l1['ssim'],
-            layer1_brisque=nriqa_l1['brisque'],
-            layer1_niqe=nriqa_l1['niqe'],
-            layer1_piqe=nriqa_l1['piqe'],
+            layer1_brisque=metrics_l1['brisque'],
+            layer1_niqe=metrics_l1['niqe'],
+            layer1_piqe=metrics_l1['piqe'],
             layer2_mse=metrics_l2['mse'],
             layer2_psnr=metrics_l2['psnr'],
             layer2_ssim=metrics_l2['ssim'],
-            layer2_brisque=nriqa_l2['brisque'],
-            layer2_niqe=nriqa_l2['niqe'],
-            layer2_piqe=nriqa_l2['piqe'],
+            layer2_brisque=metrics_l2['brisque'],
+            layer2_niqe=metrics_l2['niqe'],
+            layer2_piqe=metrics_l2['piqe'],
         ))
         db.commit()
 
         _write_embed_to_xlsx(
             record_id=db_record.record_id,
             patient_id=patient_id,
+            method=method,
             mri_resolution=f"{mri_w}x{mri_h}",
             photo_resolution=f"{photo_w}x{photo_h}",
             txt_size_kb=file_sizes["original_txt_kb"],
             embed_layer1_seconds=time_layer1,
             embed_layer2_seconds=time_layer2,
-            embed_total_seconds=time_embed_total,
-            metrics_l1_embed={**metrics_l1, **nriqa_l1},
-            metrics_l2_embed={**metrics_l2, **nriqa_l2},
+            embed_total_seconds=time_total,
+            metrics_l1_embed=metrics_l1,
+            metrics_l2_embed=metrics_l2,
         )
 
-        write_log(db, current_user.user_id, f"UPLOAD_MEDICAL: patient_id={patient_id}, record_id={db_record.record_id}")
+        write_log(db, current_user.user_id, f"UPLOAD_MEDICAL: patient_id={patient_id}, record_id={db_record.record_id}, method={method}")
 
         return {
             "message": "Data berhasil diproses",
             "record_id": db_record.record_id,
+            "method": method,
             "stego_image": _normalize_path(stego_out_path),
-            "roni_type": "geometric_border_layer1_only",
             "embed_time": {
                 "layer1_seconds": time_layer1,
                 "layer2_seconds": time_layer2,
-                "total_seconds": time_embed_total,
+                "total_seconds": time_total,
             },
             "quality_metrics": {
-                "layer1_mri_stego": {**metrics_l1, **nriqa_l1},
-                "layer2_photo_stego": {**metrics_l2, **nriqa_l2},
+                "layer1_mri_stego": metrics_l1,
+                "layer2_photo_stego": metrics_l2,
             },
             "file_sizes": file_sizes,
         }
@@ -521,6 +487,14 @@ async def upload_medical_data(
     except Exception as e:
         write_log(db, current_user.user_id, f"ERROR|UPLOAD_MEDICAL_UNEXPECTED: {e}")
         raise HTTPException(status_code=500, detail=f"Terjadi kesalahan: {str(e)}")
+
+
+@router.get("/methods")
+async def get_supported_methods():
+    return {
+        "methods": SUPPORTED_METHODS,
+        "default": "stegoshield",
+    }
 
 
 @router.get("/patient/{patient_id}")
@@ -538,38 +512,38 @@ async def get_medical_records_by_patient(
     result = []
     for record in records:
         all_metrics = db.query(ImageQualityMetric).filter(ImageQualityMetric.record_id == record.record_id).order_by(ImageQualityMetric.metric_id.asc()).all()
-        embed_m = all_metrics[0] if len(all_metrics) > 0 else None
+        embed_m   = all_metrics[0] if len(all_metrics) > 0 else None
         extract_m = all_metrics[1] if len(all_metrics) > 1 else None
 
         orig_photo_path, orig_mri_path, orig_txt_path = _get_original_paths(record.patient_id, record.stego_photo_path)
         timestamp = _parse_timestamp_from_stego(record.stego_photo_path)
         prefix = f"{record.patient_id}_{timestamp}" if timestamp else None
-        vis_mri_path = os.path.join(DIR_VISUAL, f"vis_mri_{prefix}.png") if prefix else None
+        vis_mri_path   = os.path.join(DIR_VISUAL, f"vis_mri_{prefix}.png")   if prefix else None
         vis_photo_path = os.path.join(DIR_VISUAL, f"vis_photo_{prefix}.png") if prefix else None
 
         file_sizes = {
-            "original_txt_kb": _file_size_kb(orig_txt_path) if orig_txt_path else 0.0,
-            "original_mri_kb": _file_size_kb(orig_mri_path) if orig_mri_path else 0.0,
+            "original_txt_kb":   _file_size_kb(orig_txt_path)   if orig_txt_path   else 0.0,
+            "original_mri_kb":   _file_size_kb(orig_mri_path)   if orig_mri_path   else 0.0,
             "original_photo_kb": _file_size_kb(orig_photo_path) if orig_photo_path else 0.0,
-            "stego_kb": _file_size_kb(_denormalize_path(record.stego_photo_path)),
-            "vis_mri_kb": _file_size_kb(vis_mri_path) if vis_mri_path else 0.0,
-            "vis_photo_kb": _file_size_kb(vis_photo_path) if vis_photo_path else 0.0,
+            "stego_kb":          _file_size_kb(_denormalize_path(record.stego_photo_path)),
+            "vis_mri_kb":        _file_size_kb(vis_mri_path)    if vis_mri_path    else 0.0,
+            "vis_photo_kb":      _file_size_kb(vis_photo_path)  if vis_photo_path  else 0.0,
         }
 
         result.append({
             "record_id": record.record_id,
+            "method": record.method or "stegoshield",
             "medical_data_path": record.medical_data_path,
             "photo_path": record.photo_path,
             "mri_path": record.mri_path,
             "stego_photo_path": record.stego_photo_path,
-            "roni_type": "geometric_border_layer1_only",
             "visualization": {
-                "mri_lsb_map": _normalize_path(vis_mri_path) if vis_mri_path and os.path.exists(vis_mri_path) else None,
+                "mri_lsb_map":   _normalize_path(vis_mri_path)   if vis_mri_path   and os.path.exists(vis_mri_path)   else None,
                 "photo_lsb_map": _normalize_path(vis_photo_path) if vis_photo_path and os.path.exists(vis_photo_path) else None,
             },
             "upload_date": record.created_at.isoformat() if record.created_at else None,
             "quality_metrics": {
-                "embedding": _fmt_metrics(embed_m),
+                "embedding":  _fmt_metrics(embed_m),
                 "extraction": _fmt_metrics(extract_m),
             },
             "file_sizes": file_sizes,
@@ -597,105 +571,83 @@ async def extract_medical_data(
     if not os.path.exists(stego_path):
         raise HTTPException(status_code=404, detail="File stego tidak ditemukan")
 
+    # Ambil method dari record, default stegoshield untuk data lama
+    method = record.method or "stegoshield"
+
     patient = db.query(Patient).filter(Patient.patient_id == record.patient_id).first()
     orig_photo_path, orig_mri_path, orig_txt_path = _get_original_paths(record.patient_id, record.stego_photo_path)
 
-    timestamp = _parse_timestamp_from_stego(record.stego_photo_path)
+    timestamp  = _parse_timestamp_from_stego(record.stego_photo_path)
     ext_prefix = f"{record.patient_id}_{timestamp}_{record_id}" if timestamp else f"{record.patient_id}_{record_id}"
 
-    ext_mri_path = os.path.join(DIR_EXTRACT, f"mri_{ext_prefix}.png")
+    ext_mri_path   = os.path.join(DIR_EXTRACT, f"mri_{ext_prefix}.png")
     ext_photo_path = os.path.join(DIR_EXTRACT, f"photo_{ext_prefix}.png")
-    ext_txt_path = os.path.join(DIR_EXTRACT, f"medical_{ext_prefix}.txt")
+    ext_txt_path   = os.path.join(DIR_EXTRACT, f"medical_{ext_prefix}.txt")
 
     _safe_delete(ext_mri_path, ext_photo_path, ext_txt_path)
 
     try:
         stego_img = Image.open(stego_path).convert('RGB')
 
-        t2_start = time.perf_counter()
-        extracted_mri_img = LSBHandler.extract_from_rgb_full(stego_img)
-        time_extract_layer2 = round(time.perf_counter() - t2_start, 6)
+        orig_mri_img   = Image.open(orig_mri_path).convert('L')    if orig_mri_path   and os.path.exists(orig_mri_path)   else None
+        orig_photo_img = Image.open(orig_photo_path).convert('RGB') if orig_photo_path and os.path.exists(orig_photo_path) else None
+        orig_txt       = None
+        if orig_txt_path and os.path.exists(orig_txt_path):
+            with open(orig_txt_path, "r", encoding="utf-8", newline='') as f:
+                orig_txt = f.read()
 
-        if extracted_mri_img is None:
-            raise HTTPException(status_code=500, detail="Gagal mengekstrak MRI dari stego")
+        # Route ke handler yang sesuai dengan method saat upload
+        result = route_extract(method, stego_img, orig_mri_img, orig_photo_img, orig_txt)
 
-        t1_start = time.perf_counter()
-        extracted_bytes = LSBHandler.extract_from_grayscale_geometric(extracted_mri_img, border_ratio=MRI_BORDER_RATIO)
-        time_extract_layer1 = round(time.perf_counter() - t1_start, 6)
-
-        if not extracted_bytes:
-            raise HTTPException(status_code=500, detail="Gagal menemukan data tersembunyi")
-
-        time_extract_total = round(time_extract_layer1 + time_extract_layer2, 6)
-
-        raw = extracted_bytes.decode("utf-8")
-        ciphertext, iv, mac = _unpack_encrypted(raw)
-        decrypted = aes_handler.decrypt(ciphertext, iv, mac)
-        decrypted = normalize_text(decrypted)
+        decrypted         = normalize_text(result["decrypted"])
+        extracted_mri_img = result["extracted_mri_img"]
+        cleaned_photo_img = result["cleaned_photo_img"]
+        time_layer1       = result["timing"]["layer1_seconds"]
+        time_layer2       = result["timing"]["layer2_seconds"]
+        time_total        = result["timing"]["total_seconds"]
+        metrics_l1        = result["metrics_l1"]
+        metrics_l2        = result["metrics_l2"]
 
         with open(ext_txt_path, "w", encoding="utf-8", newline='\n') as f:
             f.write(decrypted)
 
         _save_image(extracted_mri_img, ext_mri_path, compress_level=3)
-
-        stego_array = np.array(stego_img, dtype=np.uint8)
-        cleaned_photo_array = stego_array & np.uint8(0xFE)
-        cleaned_photo_img = Image.fromarray(cleaned_photo_array, mode='RGB')
         _save_image(cleaned_photo_img, ext_photo_path, compress_level=9)
 
         acctxt_result = {"acc_txt": None, "D": None, "T": None, "bit_errors": None}
-        if orig_txt_path and os.path.exists(orig_txt_path):
-            with open(orig_txt_path, "r", encoding="utf-8", newline='') as f:
-                original_text = f.read()
-            acctxt_result = _calculate_acctxt(original_text, decrypted)
+        if orig_txt is not None:
+            acctxt_result = _calculate_acctxt(orig_txt, decrypted)
 
-        metrics_l1 = {"mse": 0.0, "psnr": 100.0, "ssim": 1.0}
-        if orig_mri_path and os.path.exists(orig_mri_path):
-            orig_mri_img = Image.open(orig_mri_path)
-            if orig_mri_img.mode != 'L':
-                orig_mri_img = orig_mri_img.convert('L')
-            metrics_l1 = LSBHandler.calculate_metrics(orig_mri_img, extracted_mri_img, mode='L')
-
-        metrics_l2 = {"mse": 0.0, "psnr": 100.0, "ssim": 1.0}
-        if orig_photo_path and os.path.exists(orig_photo_path):
-            orig_photo_img = Image.open(orig_photo_path)
-            if orig_photo_img.mode != 'RGB':
-                orig_photo_img = orig_photo_img.convert('RGB')
-            metrics_l2 = LSBHandler.calculate_metrics(orig_photo_img, cleaned_photo_img, mode='RGB')
-
-        nriqa_l1 = LSBHandler.calculate_nriqa_metrics(extracted_mri_img, mode='L')
-        nriqa_l2 = LSBHandler.calculate_nriqa_metrics(cleaned_photo_img, mode='RGB')
-
-        record.extract_time_seconds = time_extract_total
+        record.extract_time_seconds = time_total
         db.commit()
 
         _update_extract_to_xlsx(
             record_id=record_id,
-            extract_layer1_seconds=time_extract_layer1,
-            extract_layer2_seconds=time_extract_layer2,
-            extract_total_seconds=time_extract_total,
-            metrics_l1_extract={**metrics_l1, **nriqa_l1},
-            metrics_l2_extract={**metrics_l2, **nriqa_l2},
+            extract_layer1_seconds=time_layer1,
+            extract_layer2_seconds=time_layer2,
+            extract_total_seconds=time_total,
+            metrics_l1_extract=metrics_l1,
+            metrics_l2_extract=metrics_l2,
         )
 
         all_metrics = db.query(ImageQualityMetric).filter(ImageQualityMetric.record_id == record_id).order_by(ImageQualityMetric.metric_id.asc()).all()
         if len(all_metrics) >= 2:
             m = all_metrics[1]
-            m.layer1_mse = metrics_l1['mse']
-            m.layer1_psnr = metrics_l1['psnr']
-            m.layer1_ssim = metrics_l1['ssim']
-            m.layer1_brisque = nriqa_l1['brisque']
-            m.layer1_niqe = nriqa_l1['niqe']
-            m.layer1_piqe = nriqa_l1['piqe']
-            m.layer2_mse = metrics_l2['mse']
-            m.layer2_psnr = metrics_l2['psnr']
-            m.layer2_ssim = metrics_l2['ssim']
-            m.layer2_brisque = nriqa_l2['brisque']
-            m.layer2_niqe = nriqa_l2['niqe']
-            m.layer2_piqe = nriqa_l2['piqe']
-            m.acc_txt = acctxt_result['acc_txt']
-            m.acc_txt_D = acctxt_result['D']
-            m.acc_txt_T = acctxt_result['T']
+            m.layer1_mse     = metrics_l1['mse']
+            m.layer1_psnr    = metrics_l1['psnr']
+            m.layer1_ssim    = metrics_l1['ssim']
+            m.layer1_brisque = metrics_l1['brisque']
+            m.layer1_niqe    = metrics_l1['niqe']
+            m.layer1_piqe    = metrics_l1['piqe']
+            m.layer2_mse     = metrics_l2['mse']
+            m.layer2_psnr    = metrics_l2['psnr']
+            m.layer2_ssim    = metrics_l2['ssim']
+            m.layer2_brisque = metrics_l2['brisque']
+            m.layer2_niqe    = metrics_l2['niqe']
+            m.layer2_piqe    = metrics_l2['piqe']
+            m.acc_txt        = acctxt_result['acc_txt']
+            m.acc_txt_D      = acctxt_result['D']
+            m.acc_txt_T      = acctxt_result['T']
             m.acc_txt_errors = acctxt_result['bit_errors']
         else:
             db.add(ImageQualityMetric(
@@ -703,15 +655,15 @@ async def extract_medical_data(
                 layer1_mse=metrics_l1['mse'],
                 layer1_psnr=metrics_l1['psnr'],
                 layer1_ssim=metrics_l1['ssim'],
-                layer1_brisque=nriqa_l1['brisque'],
-                layer1_niqe=nriqa_l1['niqe'],
-                layer1_piqe=nriqa_l1['piqe'],
+                layer1_brisque=metrics_l1['brisque'],
+                layer1_niqe=metrics_l1['niqe'],
+                layer1_piqe=metrics_l1['piqe'],
                 layer2_mse=metrics_l2['mse'],
                 layer2_psnr=metrics_l2['psnr'],
                 layer2_ssim=metrics_l2['ssim'],
-                layer2_brisque=nriqa_l2['brisque'],
-                layer2_niqe=nriqa_l2['niqe'],
-                layer2_piqe=nriqa_l2['piqe'],
+                layer2_brisque=metrics_l2['brisque'],
+                layer2_niqe=metrics_l2['niqe'],
+                layer2_piqe=metrics_l2['piqe'],
                 acc_txt=acctxt_result['acc_txt'],
                 acc_txt_D=acctxt_result['D'],
                 acc_txt_T=acctxt_result['T'],
@@ -719,38 +671,38 @@ async def extract_medical_data(
             ))
         db.commit()
 
-        write_log(db, current_user.user_id, f"EXTRACT_MEDICAL: record_id={record_id}, patient_id={record.patient_id}")
+        write_log(db, current_user.user_id, f"EXTRACT_MEDICAL: record_id={record_id}, patient_id={record.patient_id}, method={method}")
 
         return {
             "record_id": record_id,
             "patient_id": record.patient_id,
             "patient_name": patient.full_name if patient else "Unknown",
+            "method": method,
             "medical_data": decrypted,
-            "extract_time_seconds": time_extract_total,
+            "extract_time_seconds": time_total,
             "extract_time_per_layer": {
-                "layer1_seconds": time_extract_layer1,
-                "layer2_seconds": time_extract_layer2,
-                "total_seconds": time_extract_total,
+                "layer1_seconds": time_layer1,
+                "layer2_seconds": time_layer2,
+                "total_seconds": time_total,
             },
             "stego_image": record.stego_photo_path,
             "photo_path": _normalize_path(ext_photo_path),
             "mri_path": _normalize_path(ext_mri_path),
             "txt_path": _normalize_path(ext_txt_path),
             "lsb_extraction_success": True,
-            "roni_type": "geometric_border_layer1_only",
             "acc_txt": acctxt_result,
             "quality_metrics": {
                 "extraction": {
-                    "layer1_mri_stego": {**metrics_l1, **nriqa_l1},
-                    "layer2_photo_stego": {**metrics_l2, **nriqa_l2},
+                    "layer1_mri_stego":   metrics_l1,
+                    "layer2_photo_stego": metrics_l2,
                     "acc_txt": acctxt_result,
                 }
             },
             "file_sizes": {
-                "stego_kb": _file_size_kb(stego_path),
-                "extracted_mri_kb": _file_size_kb(ext_mri_path),
+                "stego_kb":           _file_size_kb(stego_path),
+                "extracted_mri_kb":   _file_size_kb(ext_mri_path),
                 "extracted_photo_kb": _file_size_kb(ext_photo_path),
-                "extracted_txt_kb": _file_size_kb(ext_txt_path),
+                "extracted_txt_kb":   _file_size_kb(ext_txt_path),
             },
         }
 
@@ -779,8 +731,8 @@ async def delete_medical_record(
     patient_id = record.patient_id
     db.query(ImageQualityMetric).filter(ImageQualityMetric.record_id == record_id).delete()
 
-    timestamp = _parse_timestamp_from_stego(record.stego_photo_path)
-    prefix = f"{record.patient_id}_{timestamp}" if timestamp else None
+    timestamp  = _parse_timestamp_from_stego(record.stego_photo_path)
+    prefix     = f"{record.patient_id}_{timestamp}"              if timestamp else None
     ext_prefix = f"{record.patient_id}_{timestamp}_{record_id}" if timestamp else f"{record.patient_id}_{record_id}"
 
     all_paths = [
@@ -792,8 +744,8 @@ async def delete_medical_record(
             os.path.join(DIR_ORIGINAL, f"photo_{prefix}.png"),
             os.path.join(DIR_ORIGINAL, f"mri_{prefix}.png"),
             os.path.join(DIR_ORIGINAL, f"medical_{prefix}.txt"),
-            os.path.join(DIR_VISUAL, f"vis_mri_{prefix}.png"),
-            os.path.join(DIR_VISUAL, f"vis_photo_{prefix}.png"),
+            os.path.join(DIR_VISUAL,   f"vis_mri_{prefix}.png"),
+            os.path.join(DIR_VISUAL,   f"vis_photo_{prefix}.png"),
         ]
 
     all_paths += [

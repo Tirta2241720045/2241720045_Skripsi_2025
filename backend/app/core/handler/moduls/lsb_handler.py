@@ -1,15 +1,15 @@
 from PIL import Image
 import numpy as np
-import math
 import struct
 import io
-import cv2
 from joblib import load
 from os.path import dirname, join
-
 from app.core.nriqa.brisque import brisque
 from app.core.nriqa.niqe import niqe
 from app.core.nriqa.piqe import piqe
+from app.core.friqa.mse import mse
+from app.core.friqa.psnr import psnr
+from app.core.friqa.ssim import ssim
 
 _SVR_MODEL_PATH = join(dirname(__file__), 'nriqa', 'svr_brisque.joblib')
 _svr_model = None
@@ -131,21 +131,12 @@ class LSBHandler:
                 ),
                 dtype=np.float64,
             )
-        mse = float(np.mean((orig - steg) ** 2))
-        psnr = 100.0 if mse == 0 else min(10 * math.log10(255.0 ** 2 / mse), 100.0)
-        try:
-            if mode == 'RGB':
-                ssim_val = float(np.mean([
-                    LSBHandler._ssim_channel(orig[:, :, c], steg[:, :, c])
-                    for c in range(3)
-                ]))
-            else:
-                ssim_val = LSBHandler._ssim_channel(orig, steg)
-        except Exception:
-            ssim_val = 1.0
+        mse_val = mse(orig, steg)
+        psnr_val = psnr(orig, steg)
+        ssim_val = ssim(orig, steg)
         return {
-            'mse': round(max(0.0, mse), 6),
-            'psnr': round(max(0.0, psnr), 4),
+            'mse': round(max(0.0, mse_val), 6),
+            'psnr': round(max(0.0, psnr_val), 4),
             'ssim': round(max(0.0, min(ssim_val, 1.0)), 6),
         }
 
@@ -178,19 +169,3 @@ class LSBHandler:
             pass
 
         return {'brisque': brisque_score, 'niqe': niqe_score, 'piqe': piqe_score}
-
-    @staticmethod
-    def _ssim_channel(a: np.ndarray, b: np.ndarray) -> float:
-        C1 = (0.01 * 255) ** 2
-        C2 = (0.03 * 255) ** 2
-        mu_a = a.mean()
-        mu_b = b.mean()
-        a_c = a - mu_a
-        b_c = b - mu_b
-        n = a.size
-        s2_a = float(np.dot(a_c.ravel(), a_c.ravel())) / n
-        s2_b = float(np.dot(b_c.ravel(), b_c.ravel())) / n
-        cov = float(np.dot(a_c.ravel(), b_c.ravel())) / n
-        num = (2.0 * mu_a * mu_b + C1) * (2.0 * cov + C2)
-        den = (mu_a ** 2 + mu_b ** 2 + C1) * (s2_a + s2_b + C2)
-        return 1.0 if den == 0 else float(num / den)
