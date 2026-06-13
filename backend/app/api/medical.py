@@ -419,7 +419,6 @@ async def upload_medical_data(
 
         db_record = MedicalRecord(
             patient_id=patient_id,
-            method=method,
             medical_data_path=_normalize_path(orig_txt_path),
             photo_path=_normalize_path(orig_photo_path),
             mri_path=_normalize_path(orig_mri_path),
@@ -450,7 +449,6 @@ async def upload_medical_data(
         _write_embed_to_xlsx(
             record_id=db_record.record_id,
             patient_id=patient_id,
-            method=method,
             mri_resolution=f"{mri_w}x{mri_h}",
             photo_resolution=f"{photo_w}x{photo_h}",
             txt_size_kb=file_sizes["original_txt_kb"],
