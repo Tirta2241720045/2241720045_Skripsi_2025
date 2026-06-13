@@ -15,63 +15,6 @@ def _pil_to_gray(img: Image.Image) -> np.ndarray:
     return np.array(img.convert("L"), dtype=np.uint8)
 
 
-def _compute_metrics(original: np.ndarray, stego: np.ndarray) -> dict:
-    orig = original.astype(np.float64)
-    steg = stego.astype(np.float64)
-    if orig.shape != steg.shape:
-        steg = cv2.resize(steg.astype(np.float32), (orig.shape[1], orig.shape[0])).astype(np.float64)
-    mse = float(np.mean((orig - steg) ** 2))
-    psnr = 100.0 if mse == 0 else min(10 * math.log10(255.0 ** 2 / mse), 100.0)
-    ssim = _ssim(orig, steg)
-    return {
-        "mse": round(mse, 6),
-        "psnr": round(psnr, 4),
-        "ssim": round(max(0.0, min(ssim, 1.0)), 6),
-    }
-
-
-def _ssim(a: np.ndarray, b: np.ndarray) -> float:
-    C1 = (0.01 * 255) ** 2
-    C2 = (0.03 * 255) ** 2
-    mu_a, mu_b = a.mean(), b.mean()
-    a_c, b_c = a - mu_a, b - mu_b
-    n = a.size
-    s2a = float(np.dot(a_c.ravel(), a_c.ravel())) / n
-    s2b = float(np.dot(b_c.ravel(), b_c.ravel())) / n
-    cov = float(np.dot(a_c.ravel(), b_c.ravel())) / n
-    num = (2.0 * mu_a * mu_b + C1) * (2.0 * cov + C2)
-    den = (mu_a ** 2 + mu_b ** 2 + C1) * (s2a + s2b + C2)
-    return 1.0 if den == 0 else float(num / den)
-
-
-def _compute_nriqa(img: Image.Image) -> dict:
-    brisque = niqe = piqe = None
-    try:
-        import torch
-        import pyiqa
-        img_np = np.array(img.convert("RGB")).astype(np.float32) / 255.0
-        tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0)
-        for name, kwargs in [
-            ("brisque", {"test_y_channel": True}),
-            ("niqe", {"test_y_channel": True}),
-            ("piqe", {}),
-        ]:
-            try:
-                metric = pyiqa.create_metric(name, device="cpu", **kwargs)
-                score = round(metric(tensor).item(), 4)
-                if name == "brisque":
-                    brisque = score
-                elif name == "niqe":
-                    niqe = score
-                else:
-                    piqe = score
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return {"brisque": brisque, "niqe": niqe, "piqe": piqe}
-
-
 def _ldpc_encode(data: bytes) -> bytes:
     if len(data) == 0:
         return b''
@@ -116,10 +59,7 @@ class _PSO:
 
     def optimize(self) -> np.ndarray:
         if self.n_bits > self.total_coeff:
-            raise ValueError(
-                f"PSO: data terlalu besar. Kapasitas HH: {self.total_coeff} bits, "
-                f"dibutuhkan: {self.n_bits} bits."
-            )
+            raise ValueError(f"PSO: data terlalu besar. Kapasitas HH: {self.total_coeff} bits, dibutuhkan: {self.n_bits} bits.")
         positions = self.rng.integers(0, self.total_coeff - self.n_bits + 1, size=self.n_particles)
         velocities = self.rng.uniform(-50, 50, size=self.n_particles)
         personal_best_pos = positions.copy()
@@ -156,20 +96,23 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     
     data_bytes = payload_text.encode("utf-8")
     data_length = len(data_bytes)
-    header = struct.pack('>I', data_length)
-    full_data = header + data_bytes
     
-    encoded = _ldpc_encode(full_data)
+    encoded = _ldpc_encode(data_bytes)
     bits = np.unpackbits(np.frombuffer(encoded, dtype=np.uint8))
     n_bits = bits.size
     
+    header = struct.pack('>II', data_length, n_bits)
+    header_bits = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
+    full_bits = np.concatenate([header_bits, bits])
+    full_n_bits = len(full_bits)
+    
     flat_cD = cD.ravel().copy()
     
-    pso = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=n_bits, seed=1234)
+    pso = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=full_n_bits, seed=1234)
     indices = pso.optimize()
     
     for i, idx in enumerate(indices):
-        coeff_int = (int(round(flat_cD[idx])) & ~1) | int(bits[i])
+        coeff_int = (int(round(flat_cD[idx])) & ~1) | int(full_bits[i])
         flat_cD[idx] = float(coeff_int)
     
     cD_modified = flat_cD.reshape(cD.shape)
@@ -206,17 +149,17 @@ def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
     
     extracted_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in indices], dtype=np.uint8)
     
-    if len(extracted_bits) < 32:
-        raise ValueError("Gagal mengekstrak header. Data terlalu pendek atau tidak valid.")
+    if len(extracted_bits) < 64:
+        raise ValueError("Gagal mengekstrak header. Data terlalu pendek.")
     
-    header_bits = extracted_bits[:32]
+    header_bits = extracted_bits[:64]
     header_bytes = np.packbits(header_bits).tobytes()
-    data_length = struct.unpack('>I', header_bytes)[0]
+    data_length, n_bits = struct.unpack('>II', header_bytes)
     
-    if data_length <= 0 or data_length > 100000:
-        raise ValueError(f"Panjang data tidak valid: {data_length}. Ekstraksi gagal.")
+    if data_length <= 0 or data_length > 100000 or n_bits <= 0:
+        raise ValueError(f"Header tidak valid: data_length={data_length}, n_bits={n_bits}")
     
-    total_bits_needed = 32 + (data_length * 8)
+    total_bits_needed = 64 + n_bits
     
     if total_bits_needed > len(extracted_bits):
         remaining = total_bits_needed - len(extracted_bits)
@@ -228,7 +171,7 @@ def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
     if len(extracted_bits) < total_bits_needed:
         raise ValueError(f"Bit tidak mencukupi. Dibutuhkan: {total_bits_needed}, tersedia: {len(extracted_bits)}")
     
-    data_bits = extracted_bits[32:total_bits_needed]
+    data_bits = extracted_bits[64:total_bits_needed]
     
     n_bytes = (len(data_bits) + 7) // 8
     packed = np.packbits(data_bits[:n_bytes * 8])
