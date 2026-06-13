@@ -449,6 +449,7 @@ async def upload_medical_data(
         _write_embed_to_xlsx(
             record_id=db_record.record_id,
             patient_id=patient_id,
+            method=method,
             mri_resolution=f"{mri_w}x{mri_h}",
             photo_resolution=f"{photo_w}x{photo_h}",
             txt_size_kb=file_sizes["original_txt_kb"],
