@@ -11,11 +11,8 @@ from app.core.friqa.mse import mse
 from app.core.friqa.psnr import psnr
 from app.core.friqa.ssim import ssim
 
-# Perbaiki path model - mencari di folder app/core/nriqa/
-# __file__ = app/core/handler/moduls/lsb_handler.py
-# dirname 3x ke atas: moduls -> handler -> core
-_CURRENT_DIR = dirname(__file__)  # app/core/handler/moduls
-_CORE_DIR = dirname(dirname(_CURRENT_DIR))  # app/core
+_CURRENT_DIR = dirname(__file__)
+_CORE_DIR = dirname(dirname(_CURRENT_DIR))
 _SVR_MODEL_PATH = join(_CORE_DIR, 'nriqa', 'svr_brisque.joblib')
 
 _svr_model = None
@@ -156,11 +153,10 @@ class LSBHandler:
         brisque_score = None
         niqe_score = None
         piqe_score = None
-        
+
         try:
             img_bgr = np.array(img.convert('RGB'))[:, :, ::-1]
 
-            # Hitung BRISQUE
             try:
                 features = brisque(img_bgr.copy()).reshape(1, -1)
                 clf, scaler = _get_svr_model()
@@ -168,22 +164,20 @@ class LSBHandler:
                     features_scaled = scaler.transform(features)
                     brisque_score = round(float(clf.predict(features_scaled)[0]), 4)
                 else:
-                    brisque_score = 50.0  # Fallback default (kualitas sedang)
+                    brisque_score = 50.0
             except Exception:
-                brisque_score = 50.0  # Fallback default
+                brisque_score = 50.0
 
-            # Hitung NIQE
             try:
                 niqe_score = round(float(niqe(img_bgr.copy())), 4)
             except Exception:
-                niqe_score = 10.0  # Fallback default
+                niqe_score = 10.0
 
-            # Hitung PIQE
             try:
                 score, _, _, _ = piqe(img_bgr.copy())
                 piqe_score = round(float(score), 4)
             except Exception:
-                piqe_score = 40.0  # Fallback default
+                piqe_score = 40.0
 
         except Exception:
             brisque_score = 50.0

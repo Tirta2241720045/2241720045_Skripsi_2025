@@ -140,32 +140,35 @@ def extract(stego_img: Image.Image) -> dict:
 
     _, (_, _, cD) = pywt.dwt2(img_gray.astype(np.float64), "haar")
     flat_cD = cD.ravel()
+    total_coeff = len(flat_cD)
 
-    header_n_bits = 64
-    pso_header = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=header_n_bits, seed=1234)
-    header_indices = pso_header.optimize()
+    max_bits = min(total_coeff, 32768)
 
-    extracted_header_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in header_indices], dtype=np.uint8)
+    pso_search = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=max_bits, seed=1234)
+    indices = pso_search.optimize()
 
-    if len(extracted_header_bits) < 64:
-        raise ValueError("Gagal mengekstrak header. Data terlalu pendek.")
+    extracted_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in indices], dtype=np.uint8)
 
-    header_bytes = np.packbits(extracted_header_bits).tobytes()
+    if len(extracted_bits) < 64:
+        raise ValueError(f"Bit tidak cukup untuk header. Tersedia: {len(extracted_bits)}, minimal: 64")
+
+    header_bits = extracted_bits[:64]
+    header_bytes = np.packbits(header_bits).tobytes()
     data_length, n_bits = struct.unpack('>II', header_bytes)
 
-    if data_length <= 0 or data_length > 100000 or n_bits <= 0:
-        raise ValueError(f"Header tidak valid: data_length={data_length}, n_bits={n_bits}")
+    max_possible_bytes = total_coeff // 8
+    if data_length <= 0 or data_length > max_possible_bytes:
+        raise ValueError(f"Header tidak valid: data_length={data_length} (maks: {max_possible_bytes})")
+    if n_bits <= 0 or n_bits > total_coeff - 64:
+        raise ValueError(f"Header tidak valid: n_bits={n_bits} (maks: {total_coeff - 64})")
 
-    total_bits_needed = header_n_bits + n_bits
+    total_bits_needed = 64 + n_bits
+    if len(extracted_bits) < total_bits_needed:
+        raise ValueError(f"Bit tidak cukup. Dibutuhkan: {total_bits_needed}, tersedia: {len(extracted_bits)}")
 
-    pso_full = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=total_bits_needed, seed=1234)
-    full_indices = pso_full.optimize()
+    data_bits = extracted_bits[64:total_bits_needed]
 
-    extracted_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in full_indices], dtype=np.uint8)
-
-    data_bits = extracted_bits[header_n_bits:total_bits_needed]
-
-    n_bytes = (len(data_bits) + 7) // 8
+    n_bytes = (n_bits + 7) // 8
     packed = np.packbits(data_bits[:n_bytes * 8])
 
     decoded = _ldpc_decode(packed.tobytes())
