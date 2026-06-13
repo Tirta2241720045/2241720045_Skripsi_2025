@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import struct
 import time
 import numpy as np
 import cv2
@@ -55,8 +54,8 @@ def _embed_to_edges(img_gray: np.ndarray, bits: np.ndarray, edge_indices: np.nda
 
 def _extract_from_edges(stego_gray: np.ndarray, n_bits: int, edge_indices: np.ndarray) -> np.ndarray:
     flat = stego_gray.ravel()
-    if n_bits > len(edge_indices):
-        raise ValueError(f"Tidak cukup edge. Dibutuhkan: {n_bits}, tersedia: {len(edge_indices)}")
+    if n_bits > edge_indices.size:
+        raise ValueError(f"Tidak cukup edge. Dibutuhkan: {n_bits}, tersedia: {edge_indices.size}")
     targets = edge_indices[:n_bits]
     return (flat[targets] & 1).astype(np.uint8)
 
@@ -128,14 +127,9 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
     edge_indices = _detect_edges(cover_gray)
     encrypted_matrix, original_len = _ebs3_encrypt(payload_text)
-    data_bits = np.unpackbits(encrypted_matrix.ravel())
-    n_bits = data_bits.size
+    bits = np.unpackbits(encrypted_matrix.ravel())
 
-    header = struct.pack('>II', original_len, n_bits)
-    header_bits = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
-    full_bits = np.concatenate([header_bits, data_bits])
-
-    stego_arr = _embed_to_edges(cover_gray, full_bits, edge_indices)
+    stego_arr = _embed_to_edges(cover_gray, bits, edge_indices)
     stego_img = Image.fromarray(stego_arr, mode="L")
 
     t_embed = round(time.perf_counter() - t_start, 6)
@@ -151,45 +145,27 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     }
 
 
-def extract(stego_img: Image.Image) -> dict:
+def extract(stego_img: Image.Image, payload_text: str) -> dict:
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(img_gray)
 
-    total_edge_bits = len(edge_indices)
-    if total_edge_bits < 64:
-        raise ValueError(f"Edge tidak cukup untuk ekstraksi. Tersedia: {total_edge_bits}, minimal: 64")
+    encrypted_matrix, original_len = _ebs3_encrypt(payload_text)
+    n_bits = np.unpackbits(encrypted_matrix.ravel()).size
 
-    header_bits = _extract_from_edges(img_gray, 64, edge_indices)
-    header_bytes = np.packbits(header_bits).tobytes()
-    original_len, n_bits = struct.unpack('>II', header_bytes)
+    if edge_indices.size < n_bits:
+        raise ValueError(f"Edge tidak cukup. Dibutuhkan: {n_bits}, tersedia: {edge_indices.size}")
 
-    max_possible_bytes = total_edge_bits // 8
-    if original_len <= 0 or original_len > max_possible_bytes:
-        raise ValueError(f"Header tidak valid: original_len={original_len} (maks: {max_possible_bytes})")
-    if n_bits <= 0 or n_bits > total_edge_bits - 64:
-        raise ValueError(f"Header tidak valid: n_bits={n_bits} (maks: {total_edge_bits - 64})")
+    extracted_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
 
-    total_bits = 64 + n_bits
-    if total_edge_bits < total_bits:
-        raise ValueError(f"Edge tidak cukup. Dibutuhkan: {total_bits}, tersedia: {total_edge_bits}")
-
-    all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
-    data_bits = all_bits[64:total_bits]
-
-    expected_bytes = (n_bits + 7) // 8
-    packed = np.packbits(data_bits[:expected_bytes * 8])
+    n_bytes = n_bits // 8
+    packed = np.packbits(extracted_bits[:n_bytes * 8])
 
     rows = (original_len + 7) // 8
     cols = 8
-    expected_matrix_size = rows * cols
-
-    if len(packed) < expected_matrix_size:
-        raise ValueError(f"Data tidak cukup. Dibutuhkan: {expected_matrix_size}, tersedia: {len(packed)}")
-
-    matrix = packed[:expected_matrix_size].reshape(rows, cols)
+    matrix = packed[:rows * cols].reshape(rows, cols)
     recovered = _ebs3_decrypt(matrix, original_len)
 
     t_extract = round(time.perf_counter() - t_start, 6)
