@@ -103,18 +103,14 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     bits = np.unpackbits(np.frombuffer(encoded, dtype=np.uint8))
     n_bits = bits.size
 
-    header = struct.pack('>II', data_length, n_bits)
-    header_bits = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
-    full_bits = np.concatenate([header_bits, bits])
-    full_n_bits = len(full_bits)
-
     flat_cD = cD.ravel().copy()
 
-    pso = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=full_n_bits, seed=1234)
+    pso = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=n_bits, seed=1234)
     indices = pso.optimize()
+    start_pos = indices[0] if len(indices) > 0 else 0
 
     for i, idx in enumerate(indices):
-        coeff_int = (int(round(flat_cD[idx])) & ~1) | int(full_bits[i])
+        coeff_int = (int(round(flat_cD[idx])) & ~1) | int(bits[i])
         flat_cD[idx] = float(coeff_int)
 
     cD_modified = flat_cD.reshape(cD.shape)
@@ -132,6 +128,8 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
         "stego_img": stego_img,
         "timing": {"embed_seconds": t_embed},
         "metrics": {**fr, **nr},
+        "pso_start_pos": start_pos,
+        "pso_n_bits": n_bits,
     }
 
 
@@ -144,43 +142,26 @@ def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
     flat_cD = cD.ravel()
     total_coeff = len(flat_cD)
 
-    max_bits = min(total_coeff, 32768)
+    # Gunakan n_bits yang diketahui (dari parameter payload_text jika ada)
+    if payload_text is not None:
+        encoded = _ldpc_encode(payload_text.encode("utf-8"))
+        bits = np.unpackbits(np.frombuffer(encoded, dtype=np.uint8))
+        n_bits = bits.size
+    else:
+        raise ValueError("DWT-PSO membutuhkan teks asli untuk menentukan n_bits")
 
-    pso_search = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=max_bits, seed=1234)
-    indices = pso_search.optimize()
+    if n_bits > total_coeff:
+        raise ValueError(f"n_bits {n_bits} melebihi kapasitas {total_coeff}")
+
+    pso = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=n_bits, seed=1234)
+    indices = pso.optimize()
 
     extracted_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in indices], dtype=np.uint8)
 
-    if len(extracted_bits) < 64:
-        raise ValueError(f"Bit tidak cukup untuk header. Tersedia: {len(extracted_bits)}, minimal: 64")
-
-    header_bits = extracted_bits[:64]
-    header_bytes = np.packbits(header_bits).tobytes()
-    data_length, n_bits = struct.unpack('>II', header_bytes)
-
-    max_possible_bytes = total_coeff // 8
-    if data_length <= 0 or data_length > max_possible_bytes:
-        raise ValueError(f"Header tidak valid: data_length={data_length} (maks: {max_possible_bytes})")
-    if n_bits <= 0 or n_bits > total_coeff - 64:
-        raise ValueError(f"Header tidak valid: n_bits={n_bits} (maks: {total_coeff - 64})")
-
-    total_bits_needed = 64 + n_bits
-    if len(extracted_bits) < total_bits_needed:
-        if total_bits_needed <= total_coeff:
-            pso_full = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=total_bits_needed, seed=1234)
-            indices_full = pso_full.optimize()
-            extracted_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in indices_full], dtype=np.uint8)
-
-    if len(extracted_bits) < total_bits_needed:
-        raise ValueError(f"Bit tidak cukup. Dibutuhkan: {total_bits_needed}, tersedia: {len(extracted_bits)}")
-
-    data_bits = extracted_bits[64:total_bits_needed]
-
-    n_bytes = (n_bits + 7) // 8
-    packed = np.packbits(data_bits[:n_bytes * 8])
-
+    n_bytes = n_bits // 8
+    packed = np.packbits(extracted_bits[:n_bytes * 8])
     decoded = _ldpc_decode(packed.tobytes())
-    recovered = decoded[:data_length].decode("utf-8", errors="replace")
+    recovered = decoded.decode("utf-8", errors="replace")
 
     t_extract = round(time.perf_counter() - t_start, 6)
 
