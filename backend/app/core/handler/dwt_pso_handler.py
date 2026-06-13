@@ -82,8 +82,11 @@ class DWTPSOHandler:
         if extracted_mri_img is None:
             raise ValueError("Gagal mengekstrak MRI dari stego.")
 
+        if orig_txt is None:
+            raise ValueError("DWT-PSO membutuhkan teks asli untuk proses ekstraksi")
+
         t1_start = time.perf_counter()
-        result_l1 = dwt_pso.extract(extracted_mri_img)
+        result_l1 = dwt_pso.extract(extracted_mri_img, orig_txt)  # ← KIRIM orig_txt
         time_layer1 = round(time.perf_counter() - t1_start, 6)
 
         decrypted = result_l1["recovered_text"]

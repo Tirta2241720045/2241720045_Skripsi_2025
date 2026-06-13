@@ -133,22 +133,22 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     }
 
 
-def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
+def extract(stego_img: Image.Image, payload_text: str) -> dict:
+    if payload_text is None:
+        raise ValueError("DWT-PSO membutuhkan teks asli untuk proses ekstraksi")
+
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     _, (_, _, cD) = pywt.dwt2(img_gray.astype(np.float64), "haar")
+
+    encoded = _ldpc_encode(payload_text.encode("utf-8"))
+    bits = np.unpackbits(np.frombuffer(encoded, dtype=np.uint8))
+    n_bits = bits.size
+
     flat_cD = cD.ravel()
     total_coeff = len(flat_cD)
-
-    # Gunakan n_bits yang diketahui (dari parameter payload_text jika ada)
-    if payload_text is not None:
-        encoded = _ldpc_encode(payload_text.encode("utf-8"))
-        bits = np.unpackbits(np.frombuffer(encoded, dtype=np.uint8))
-        n_bits = bits.size
-    else:
-        raise ValueError("DWT-PSO membutuhkan teks asli untuk menentukan n_bits")
 
     if n_bits > total_coeff:
         raise ValueError(f"n_bits {n_bits} melebihi kapasitas {total_coeff}")
@@ -157,7 +157,6 @@ def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
     indices = pso.optimize()
 
     extracted_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in indices], dtype=np.uint8)
-
     n_bytes = n_bits // 8
     packed = np.packbits(extracted_bits[:n_bytes * 8])
     decoded = _ldpc_decode(packed.tobytes())
