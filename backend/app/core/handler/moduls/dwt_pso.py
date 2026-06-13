@@ -93,28 +93,28 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
     coeffs = pywt.dwt2(img_float, "haar")
     cA, (cH, cV, cD) = coeffs
-    
+
     data_bytes = payload_text.encode("utf-8")
     data_length = len(data_bytes)
-    
+
     encoded = _ldpc_encode(data_bytes)
     bits = np.unpackbits(np.frombuffer(encoded, dtype=np.uint8))
     n_bits = bits.size
-    
+
     header = struct.pack('>II', data_length, n_bits)
     header_bits = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
     full_bits = np.concatenate([header_bits, bits])
     full_n_bits = len(full_bits)
-    
+
     flat_cD = cD.ravel().copy()
-    
+
     pso = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=full_n_bits, seed=1234)
     indices = pso.optimize()
-    
+
     for i, idx in enumerate(indices):
         coeff_int = (int(round(flat_cD[idx])) & ~1) | int(full_bits[i])
         flat_cD[idx] = float(coeff_int)
-    
+
     cD_modified = flat_cD.reshape(cD.shape)
     reconstructed = pywt.idwt2((cA, (cH, cV, cD_modified)), "haar")
     reconstructed = np.clip(reconstructed, 0, 255).astype(np.uint8)
@@ -133,49 +133,41 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     }
 
 
-def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
+def extract(stego_img: Image.Image) -> dict:
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     _, (_, _, cD) = pywt.dwt2(img_gray.astype(np.float64), "haar")
     flat_cD = cD.ravel()
-    
-    max_capacity = len(flat_cD)
-    search_bits = min(max_capacity, 10000)
-    
-    pso = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=search_bits, seed=1234)
-    indices = pso.optimize()
-    
-    extracted_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in indices], dtype=np.uint8)
-    
-    if len(extracted_bits) < 64:
+
+    header_n_bits = 64
+    pso_header = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=header_n_bits, seed=1234)
+    header_indices = pso_header.optimize()
+
+    extracted_header_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in header_indices], dtype=np.uint8)
+
+    if len(extracted_header_bits) < 64:
         raise ValueError("Gagal mengekstrak header. Data terlalu pendek.")
-    
-    header_bits = extracted_bits[:64]
-    header_bytes = np.packbits(header_bits).tobytes()
+
+    header_bytes = np.packbits(extracted_header_bits).tobytes()
     data_length, n_bits = struct.unpack('>II', header_bytes)
-    
+
     if data_length <= 0 or data_length > 100000 or n_bits <= 0:
         raise ValueError(f"Header tidak valid: data_length={data_length}, n_bits={n_bits}")
-    
-    total_bits_needed = 64 + n_bits
-    
-    if total_bits_needed > len(extracted_bits):
-        remaining = total_bits_needed - len(extracted_bits)
-        if remaining <= len(flat_cD) - search_bits:
-            additional_indices = np.arange(search_bits, search_bits + remaining, dtype=np.int64)
-            additional_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in additional_indices], dtype=np.uint8)
-            extracted_bits = np.concatenate([extracted_bits, additional_bits])
-    
-    if len(extracted_bits) < total_bits_needed:
-        raise ValueError(f"Bit tidak mencukupi. Dibutuhkan: {total_bits_needed}, tersedia: {len(extracted_bits)}")
-    
-    data_bits = extracted_bits[64:total_bits_needed]
-    
+
+    total_bits_needed = header_n_bits + n_bits
+
+    pso_full = _PSO(n_particles=15, n_iter=20, band_flat=flat_cD, n_bits=total_bits_needed, seed=1234)
+    full_indices = pso_full.optimize()
+
+    extracted_bits = np.array([int(round(flat_cD[idx])) & 1 for idx in full_indices], dtype=np.uint8)
+
+    data_bits = extracted_bits[header_n_bits:total_bits_needed]
+
     n_bytes = (len(data_bits) + 7) // 8
     packed = np.packbits(data_bits[:n_bytes * 8])
-    
+
     decoded = _ldpc_decode(packed.tobytes())
     recovered = decoded[:data_length].decode("utf-8", errors="replace")
 

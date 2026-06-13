@@ -11,16 +11,6 @@ from app.core.handler.moduls import dwt_pso
 from app.core.handler.moduls.lsb_handler import LSBHandler
 
 
-def _compute_metrics_rgb(original: Image.Image, stego: Image.Image) -> dict:
-    orig = np.array(original.convert("RGB"), dtype=np.float64)
-    steg = np.array(stego.convert("RGB"), dtype=np.float64)
-    if orig.shape != steg.shape:
-        steg = cv2.resize(steg.astype(np.float32), (orig.shape[1], orig.shape[0])).astype(np.float64)
-    mse = float(np.mean((orig - steg) ** 2))
-    psnr = 100.0 if mse == 0 else min(10 * math.log10(255.0 ** 2 / mse), 100.0)
-    return {"mse": round(mse, 6), "psnr": round(psnr, 4), "ssim": None}
-
-
 class DWTPSOHandler:
 
     def embed(
@@ -38,15 +28,12 @@ class DWTPSOHandler:
                 f"dari foto pasien ({photo_w}x{photo_h})."
             )
 
-        # Layer 1 — DWT + PSO embed teks ke MRI
         t1_start = time.perf_counter()
         result_l1 = dwt_pso.embed(img_mri, txt_content)
         time_layer1 = round(time.perf_counter() - t1_start, 6)
 
         mri_stego_img = result_l1["stego_img"]
-        metrics_l1_raw = result_l1["metrics"]
 
-        # Cek kapasitas Layer 2
         buf = io.BytesIO()
         mri_stego_img.save(buf, format='PNG', compress_level=3)
         mri_stego_bytes = buf.getvalue()
@@ -57,18 +44,15 @@ class DWTPSOHandler:
                 f"MRI stego terlalu besar. Kapasitas foto: {photo_full_capacity} bytes."
             )
 
-        # Layer 2 — LSB RGB full embed MRI stego ke foto (sama dengan stegoshield)
         t2_start = time.perf_counter()
         stego_img = LSBHandler.embed_to_rgb_full(img_photo, mri_stego_img)
         time_layer2 = round(time.perf_counter() - t2_start, 6)
 
         time_total = round(time_layer1 + time_layer2, 6)
 
-        # Metrics Layer 1
         metrics_l1 = LSBHandler.calculate_metrics(img_mri, mri_stego_img, mode='L')
         nriqa_l1 = LSBHandler.calculate_nriqa_metrics(mri_stego_img, mode='L')
 
-        # Metrics Layer 2
         metrics_l2 = LSBHandler.calculate_metrics(img_photo, stego_img, mode='RGB')
         nriqa_l2 = LSBHandler.calculate_nriqa_metrics(stego_img, mode='RGB')
 
@@ -91,7 +75,6 @@ class DWTPSOHandler:
         orig_photo_img: Image.Image | None = None,
         orig_txt: str | None = None,
     ) -> dict:
-        # Layer 2 — ekstrak MRI stego dari foto
         t2_start = time.perf_counter()
         extracted_mri_img = LSBHandler.extract_from_rgb_full(stego_img)
         time_layer2 = round(time.perf_counter() - t2_start, 6)
@@ -99,30 +82,22 @@ class DWTPSOHandler:
         if extracted_mri_img is None:
             raise ValueError("Gagal mengekstrak MRI dari stego.")
 
-        # Layer 1 — DWT + PSO ekstrak teks dari MRI stego
-        # Butuh orig_txt untuk tahu n_bits (karakteristik DWT-PSO)
-        if orig_txt is None:
-            raise ValueError("DWT-PSO membutuhkan teks asli untuk proses ekstraksi.")
-
         t1_start = time.perf_counter()
-        result_l1 = dwt_pso.extract(extracted_mri_img, orig_txt)
+        result_l1 = dwt_pso.extract(extracted_mri_img)
         time_layer1 = round(time.perf_counter() - t1_start, 6)
 
         decrypted = result_l1["recovered_text"]
         time_total = round(time_layer1 + time_layer2, 6)
 
-        # Cleaned photo
         stego_array = np.array(stego_img, dtype=np.uint8)
         cleaned_photo_array = stego_array & np.uint8(0xFE)
         cleaned_photo_img = Image.fromarray(cleaned_photo_array, mode='RGB')
 
-        # Metrics Layer 1
         metrics_l1 = {"mse": 0.0, "psnr": 100.0, "ssim": 1.0}
         if orig_mri_img is not None:
             metrics_l1 = LSBHandler.calculate_metrics(orig_mri_img, extracted_mri_img, mode='L')
         nriqa_l1 = LSBHandler.calculate_nriqa_metrics(extracted_mri_img, mode='L')
 
-        # Metrics Layer 2
         metrics_l2 = {"mse": 0.0, "psnr": 100.0, "ssim": 1.0}
         if orig_photo_img is not None:
             metrics_l2 = LSBHandler.calculate_metrics(orig_photo_img, cleaned_photo_img, mode='RGB')

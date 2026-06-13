@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import time
 import numpy as np
 import cv2
@@ -8,17 +9,9 @@ from PIL import Image
 from app.core.handler.moduls.lsb_handler import LSBHandler
 
 
-# =============================================================================
-# Helpers internal (tanpa metrics)
-# =============================================================================
-
 def _pil_to_gray(img: Image.Image) -> np.ndarray:
     return np.array(img.convert("L"), dtype=np.uint8)
 
-
-# =============================================================================
-# Edge detection (Prewitt + Canny fallback)
-# =============================================================================
 
 def _detect_edges_prewitt(img_gray: np.ndarray, threshold: float = 0.025) -> np.ndarray:
     img_float = img_gray.astype(np.float32)
@@ -65,10 +58,6 @@ def _extract_from_edges(stego_gray: np.ndarray, n_bits: int, edge_indices: np.nd
     return (flat[edge_indices[:n_bits]] & 1).astype(np.uint8)
 
 
-# =============================================================================
-# Matrix helpers untuk EBS-3
-# =============================================================================
-
 def _text_to_byte_matrix(text: str) -> np.ndarray:
     import math as _math
     data = text.encode("utf-8")
@@ -91,10 +80,6 @@ def _circular_right_shift_cols(matrix: np.ndarray, shift: int) -> np.ndarray:
         result[i] = np.roll(result[i], shift_mod)
     return result
 
-
-# =============================================================================
-# EBS-3 crypto (3-layer: S-Box + Shift + XOR)
-# =============================================================================
 
 _RNG_SBOX = np.random.default_rng(20240101)
 _SBOX = _RNG_SBOX.permutation(256).astype(np.uint8)
@@ -132,10 +117,6 @@ def _ebs3_decrypt(matrix: np.ndarray, original_len: int) -> str:
     return _byte_matrix_to_text(m, original_len)
 
 
-# =============================================================================
-# Public API
-# =============================================================================
-
 def embed(cover_img: Image.Image, payload_text: str) -> dict:
     cover_gray = _pil_to_gray(cover_img)
 
@@ -143,13 +124,19 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
     edge_indices = _detect_edges(cover_gray)
     encrypted_matrix, original_len = _ebs3_encrypt(payload_text)
-    bits = np.unpackbits(encrypted_matrix.ravel())
-    stego_arr = _embed_to_edges(cover_gray, bits, edge_indices)
+    data_bits = np.unpackbits(encrypted_matrix.ravel())
+    n_bits = data_bits.size
+
+    # Header: original_len (uint32) + n_bits (uint32) = 64 bit
+    header = struct.pack('>II', original_len, n_bits)
+    header_bits = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
+    full_bits = np.concatenate([header_bits, data_bits])
+
+    stego_arr = _embed_to_edges(cover_gray, full_bits, edge_indices)
     stego_img = Image.fromarray(stego_arr, mode="L")
 
     t_embed = round(time.perf_counter() - t_start, 6)
 
-    # Gunakan LSBHandler untuk metrics
     cover_img_pil = Image.fromarray(cover_gray, mode="L")
     fr = LSBHandler.calculate_metrics(cover_img_pil, stego_img, mode='L')
     nr = LSBHandler.calculate_nriqa_metrics(stego_img, mode='L')
@@ -161,25 +148,46 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     }
 
 
-def extract(stego_img: Image.Image, payload_text: str) -> dict:
+def extract(stego_img: Image.Image) -> dict:
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(img_gray)
-    encrypted_matrix, original_len = _ebs3_encrypt(payload_text)
-    n_bits = np.unpackbits(encrypted_matrix.ravel()).size
-    extracted_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
+
+    if edge_indices.size < 64:
+        raise ValueError("Gagal mengekstrak header. Edge terlalu sedikit.")
+
+    # Baca header 64 bit
+    header_bits = _extract_from_edges(img_gray, 64, edge_indices)
+    header_bytes = np.packbits(header_bits).tobytes()
+    original_len, n_bits = struct.unpack('>II', header_bytes)
+
+    if original_len <= 0 or original_len > 100000 or n_bits <= 0:
+        raise ValueError(f"Header tidak valid: original_len={original_len}, n_bits={n_bits}")
+
+    total_bits = 64 + n_bits
+    if edge_indices.size < total_bits:
+        raise ValueError(
+            f"Edge tidak cukup untuk ekstraksi. Dibutuhkan: {total_bits}, tersedia: {edge_indices.size}"
+        )
+
+    # Baca semua bit (header + data), ambil bagian data saja
+    all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
+    data_bits = all_bits[64:]
+
     n_bytes = n_bits // 8
-    packed = np.packbits(extracted_bits[:n_bytes * 8])
-    rows, cols = encrypted_matrix.shape
+    packed = np.packbits(data_bits[:n_bytes * 8])
+
+    # Rekonstruksi matrix: rows * 8 bytes = n_bytes
+    import math as _math
+    rows = _math.ceil(original_len / 8)
+    cols = 8
     matrix = packed[:rows * cols].reshape(rows, cols)
     recovered = _ebs3_decrypt(matrix, original_len)
 
     t_extract = round(time.perf_counter() - t_start, 6)
 
-    # Metrics tidak perlu dihitung di extract karena handler akan hitung sendiri
-    # Tapi tetap return untuk konsistensi
     return {
         "recovered_text": recovered,
         "timing": {"extract_seconds": t_extract},
