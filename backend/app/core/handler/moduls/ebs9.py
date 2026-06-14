@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import struct
 import time
 import numpy as np
 import cv2
@@ -123,51 +122,67 @@ def _transpose_matrix(matrix: np.ndarray) -> np.ndarray:
 
 
 def _three_way_separation(matrix: np.ndarray) -> np.ndarray:
-    """Three way separation sesuai kode lama (safe version)"""
+    """
+    Three way separation - SAMA PERSIS dengan kode lama
+    Tidak mengubah shape matrix, hanya meracik ulang data
+    """
     flat = matrix.ravel()
     n = len(flat)
     third = (n + 2) // 3
-    padded = False
-
+    
+    # Simpan shape asli
+    original_shape = matrix.shape
+    
+    # Pad jika perlu (untuk perhitungan sementara)
     if n % 3 != 0:
         pad_size = third * 3 - n
-        flat = np.pad(flat, (0, pad_size), constant_values=0)
-        padded = True
-
-    part1 = flat[:third]
-    part2 = flat[third:2 * third]
-    part3 = flat[2 * third:]
-
-    result = np.concatenate([part3, part1, part2])
-
-    if padded:
-        result = result[:n]
-
-    return result.reshape(matrix.shape)
+        flat_padded = np.pad(flat, (0, pad_size), constant_values=0)
+    else:
+        flat_padded = flat
+    
+    part1 = flat_padded[:third]
+    part2 = flat_padded[third:2*third]
+    part3 = flat_padded[2*third:]
+    
+    result_padded = np.concatenate([part3, part1, part2])
+    
+    # Kembalikan ke ukuran asli (buang padding)
+    result = result_padded[:n]
+    
+    # Kembalikan ke shape asli
+    return result.reshape(original_shape)
 
 
 def _three_way_separation_inv(matrix: np.ndarray) -> np.ndarray:
-    """Inverse three way separation sesuai kode lama (safe version)"""
+    """
+    Inverse three way separation - SAMA PERSIS dengan kode lama
+    Tidak mengubah shape matrix, hanya meracik ulang data
+    """
     flat = matrix.ravel()
     n = len(flat)
     third = (n + 2) // 3
-    padded = False
-
+    
+    # Simpan shape asli
+    original_shape = matrix.shape
+    
+    # Pad jika perlu (untuk perhitungan sementara)
     if n % 3 != 0:
         pad_size = third * 3 - n
-        flat = np.pad(flat, (0, pad_size), constant_values=0)
-        padded = True
-
-    part3 = flat[:third]
-    part1 = flat[third:2 * third]
-    part2 = flat[2 * third:]
-
-    result = np.concatenate([part1, part2, part3])
-
-    if padded:
-        result = result[:n]
-
-    return result.reshape(matrix.shape)
+        flat_padded = np.pad(flat, (0, pad_size), constant_values=0)
+    else:
+        flat_padded = flat
+    
+    part3 = flat_padded[:third]
+    part1 = flat_padded[third:2*third]
+    part2 = flat_padded[2*third:]
+    
+    result_padded = np.concatenate([part1, part2, part3])
+    
+    # Kembalikan ke ukuran asli (buang padding)
+    result = result_padded[:n]
+    
+    # Kembalikan ke shape asli
+    return result.reshape(original_shape)
 
 
 def _permutation_9(matrix: np.ndarray) -> np.ndarray:
@@ -229,6 +244,10 @@ def _ebs9_decrypt(matrix: np.ndarray, original_len: int) -> str:
 
 
 def embed(cover_img: Image.Image, payload_text: str) -> dict:
+    """
+    Embed payload ke cover image menggunakan EBS9.
+    Kembalikan stego image + metadata (original_len, n_bits)
+    """
     cover_gray = _pil_to_gray(cover_img)
 
     t_start = time.perf_counter()
@@ -260,41 +279,49 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
 
 def extract(stego_img: Image.Image, original_len: int = None, n_bits: int = None) -> dict:
+    """
+    Ekstrak payload dari stego image menggunakan EBS9.
+    original_len dan n_bits harus diberikan dari metadata yang disimpan di photo.
+    """
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(img_gray)
 
-    # Jika original_len dan n_bits tidak diberikan, kita harus mengekstrak semuanya
-    # Ini untuk kompatibilitas dengan cara lama (semua edge digunakan)
+    # original_len dan n_bits WAJIB diberikan dari handler
     if original_len is None or n_bits is None:
-        # Ekstrak semua edge yang tersedia
-        total_bits = min(len(edge_indices), img_gray.size)
-        all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
-        data_bits = all_bits
-        n_bits = len(data_bits)
-    else:
-        # Ekstrak sesuai dengan panjang yang diketahui
-        if len(edge_indices) < n_bits:
-            raise ValueError(f"Edge tidak cukup. Dibutuhkan: {n_bits}, tersedia: {len(edge_indices)}")
-        data_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
+        raise ValueError(
+            "EBS9 extract: original_len dan n_bits harus diberikan. "
+            "Metadata harus diekstrak dari photo terlebih dahulu."
+        )
 
+    # Validasi edge cukup
+    if len(edge_indices) < n_bits:
+        raise ValueError(
+            f"Edge tidak cukup. Dibutuhkan: {n_bits} bits, "
+            f"tersedia: {len(edge_indices)} bits"
+        )
+
+    # Ekstrak data bits dari edge
+    data_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
+
+    # Konversi bits ke bytes
     expected_bytes = (n_bits + 7) // 8
     packed = np.packbits(data_bits[:expected_bytes * 8])
 
-    # Coba tebak original_len dari data jika tidak diberikan
-    if original_len is None:
-        # Asumsikan semua data adalah teks yang valid
-        original_len = len(packed)
-
+    # Hitung ukuran matrix yang diharapkan
     rows = (original_len + 7) // 8
     cols = 8
     expected_matrix_size = rows * cols
 
     if len(packed) < expected_matrix_size:
-        raise ValueError(f"Data tidak cukup. Dibutuhkan: {expected_matrix_size}, tersedia: {len(packed)}")
+        raise ValueError(
+            f"Data tidak cukup. Dibutuhkan: {expected_matrix_size} bytes, "
+            f"tersedia: {len(packed)} bytes"
+        )
 
+    # Bentuk matrix dan decrypt
     matrix = packed[:expected_matrix_size].reshape(rows, cols)
     recovered = _ebs9_decrypt(matrix, original_len)
 
