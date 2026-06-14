@@ -17,10 +17,7 @@ class EBS9Handler:
         img_photo: Image.Image,
         txt_content: str,
     ) -> dict:
-        """
-        Embed teks ke dalam MRI (layer 1 menggunakan EBS9),
-        lalu embed MRI stego ke dalam photo (layer 2 menggunakan LSB).
-        """
+        """Embed teks ke dalam MRI (EBS9), lalu embed ke photo."""
         photo_w, photo_h = img_photo.size
         mri_w, mri_h = img_mri.size
 
@@ -44,13 +41,7 @@ class EBS9Handler:
         mri_stego_img.save(buf, format='PNG', compress_level=3)
         mri_stego_bytes = buf.getvalue()
 
-        # SEDERHANA: Simpan metadata DI NAMA FILE (bukan di dalam gambar)
-        # Metadata akan disimpan di return dict, dan nanti saat extract,
-        # metadata akan diteruskan melalui parameter.
-        # Untuk keperluan persistensi, metadata bisa disimpan di database
-        # atau di nama file. Untuk sekarang, kita simpan di return.
-
-        # Layer 2: Embed MRI stego bytes ke photo (TANPA metadata di dalamnya)
+        # Layer 2: Embed MRI stego bytes ke photo
         t2_start = time.perf_counter()
         stego_img = LSBHandler.embed_to_rgb_full_with_bytes(img_photo, mri_stego_bytes)
         time_layer2 = round(time.perf_counter() - t2_start, 6)
@@ -87,29 +78,23 @@ class EBS9Handler:
     ) -> dict:
         """
         Ekstrak data dari stego photo.
-        original_len dan n_bits harus diberikan melalui parameter.
+        original_len dan n_bits diambil dari orig_txt (metadata dari database/nama file)
         """
-        # Metadata harus diberikan melalui parameter
-        # Karena kita tidak menyimpan metadata di dalam gambar,
-        # maka original_len dan n_bits HARUS diambil dari database
-        # atau disimpan di nama file.
-        
-        # Untuk sementara, jika tidak ada metadata, raise error
-        if orig_txt is None:
+        # Ambil metadata dari orig_txt (format: "original_len:n_bits")
+        if orig_txt is None or ":" not in orig_txt:
             raise ValueError(
-                "EBS9 extract: original_len dan n_bits tidak tersedia. "
-                "Metadata harus disimpan di database atau di nama file."
+                "EBS9 extract: metadata (original_len:n_bits) harus disediakan. "
+                "Contoh: '150:1200'"
             )
         
-        # Asumsikan orig_txt berisi format "original_len:n_bits"
         try:
             parts = orig_txt.split(":")
             original_len = int(parts[0])
             n_bits = int(parts[1])
-        except (ValueError, IndexError):
-            raise ValueError(f"Format metadata tidak valid: {orig_txt}")
+        except (ValueError, IndexError) as e:
+            raise ValueError(f"Format metadata tidak valid: {orig_txt}. Error: {e}")
 
-        # Layer 2: Extract MRI stego bytes dari photo (tanpa metadata)
+        # Layer 2: Extract MRI stego bytes dari photo
         t2_start = time.perf_counter()
         mri_stego_bytes = LSBHandler.extract_from_rgb_full_bytes(stego_img)
         time_layer2 = round(time.perf_counter() - t2_start, 6)

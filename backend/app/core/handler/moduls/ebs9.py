@@ -220,6 +220,7 @@ def _ebs9_decrypt(matrix: np.ndarray, original_len: int) -> str:
 
 
 def embed(cover_img: Image.Image, payload_text: str) -> dict:
+    """Embed payload ke cover image menggunakan EBS9."""
     cover_gray = _pil_to_gray(cover_img)
 
     t_start = time.perf_counter()
@@ -229,7 +230,6 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     data_bits = np.unpackbits(encrypted_matrix.ravel())
     n_bits = data_bits.size
 
-    # Langsung embed bits ke edge (tanpa header)
     full_bits = data_bits
 
     stego_arr = _embed_to_edges(cover_gray, full_bits, edge_indices)
@@ -251,31 +251,24 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
 
 def extract(stego_img: Image.Image, original_len: int, n_bits: int) -> dict:
-    """
-    Ekstrak payload dari stego image menggunakan EBS9.
-    original_len dan n_bits WAJIB diberikan (dari metadata di handler)
-    """
+    """Ekstrak payload dari stego image menggunakan EBS9."""
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(img_gray)
 
-    # Validasi edge cukup
     if len(edge_indices) < n_bits:
         raise ValueError(
             f"Edge tidak cukup. Dibutuhkan: {n_bits} bits, "
             f"tersedia: {len(edge_indices)} bits"
         )
 
-    # Ekstrak data bits dari edge
     data_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
 
-    # Konversi bits ke bytes
     expected_bytes = (n_bits + 7) // 8
     packed = np.packbits(data_bits[:expected_bytes * 8])
 
-    # Hitung ukuran matrix yang diharapkan
     rows = (original_len + 7) // 8
     cols = 8
     expected_matrix_size = rows * cols
@@ -286,7 +279,6 @@ def extract(stego_img: Image.Image, original_len: int, n_bits: int) -> dict:
             f"tersedia: {len(packed)} bytes"
         )
 
-    # Bentuk matrix dan decrypt
     matrix = packed[:expected_matrix_size].reshape(rows, cols)
     recovered = _ebs9_decrypt(matrix, original_len)
 
