@@ -123,38 +123,68 @@ def _transpose_matrix(matrix: np.ndarray) -> np.ndarray:
 
 
 def _three_way_separation(matrix: np.ndarray) -> np.ndarray:
+    """Three way separation sesuai kode lama (safe version)"""
     flat = matrix.ravel()
     n = len(flat)
     third = (n + 2) // 3
-    pad_size = third * 3 - n
-    flat_p = np.pad(flat, (0, pad_size), constant_values=0) if pad_size else flat
-    result = np.concatenate([flat_p[2 * third:], flat_p[:third], flat_p[third:2 * third]])
-    return result[:n].reshape(matrix.shape)
+    padded = False
+
+    if n % 3 != 0:
+        pad_size = third * 3 - n
+        flat = np.pad(flat, (0, pad_size), constant_values=0)
+        padded = True
+
+    part1 = flat[:third]
+    part2 = flat[third:2 * third]
+    part3 = flat[2 * third:]
+
+    result = np.concatenate([part3, part1, part2])
+
+    if padded:
+        result = result[:n]
+
+    return result.reshape(matrix.shape)
 
 
 def _three_way_separation_inv(matrix: np.ndarray) -> np.ndarray:
+    """Inverse three way separation sesuai kode lama (safe version)"""
     flat = matrix.ravel()
     n = len(flat)
     third = (n + 2) // 3
-    pad_size = third * 3 - n
-    flat_p = np.pad(flat, (0, pad_size), constant_values=0) if pad_size else flat
-    result = np.concatenate([flat_p[third:2 * third], flat_p[2 * third:], flat_p[:third]])
-    return result[:n].reshape(matrix.shape)
+    padded = False
 
+    if n % 3 != 0:
+        pad_size = third * 3 - n
+        flat = np.pad(flat, (0, pad_size), constant_values=0)
+        padded = True
 
-_PERM_9 = np.array([2, 6, 0, 4, 1, 5, 3, 7])
-_PERM_9_INV = np.argsort(_PERM_9)
+    part3 = flat[:third]
+    part1 = flat[third:2 * third]
+    part2 = flat[2 * third:]
+
+    result = np.concatenate([part1, part2, part3])
+
+    if padded:
+        result = result[:n]
+
+    return result.reshape(matrix.shape)
 
 
 def _permutation_9(matrix: np.ndarray) -> np.ndarray:
-    return matrix[:, _PERM_9 % matrix.shape[1]]
+    """Permutation untuk EBS9 sesuai kode lama"""
+    perm = np.array([2, 6, 0, 4, 1, 5, 3, 7])
+    return matrix[:, perm % matrix.shape[1]]
 
 
 def _permutation_9_inv(matrix: np.ndarray) -> np.ndarray:
-    return matrix[:, _PERM_9_INV % matrix.shape[1]]
+    """Inverse permutation untuk EBS9 sesuai kode lama"""
+    perm = np.array([2, 6, 0, 4, 1, 5, 3, 7])
+    inv = np.argsort(perm % matrix.shape[1])
+    return matrix[:, inv]
 
 
 def _one_iteration_9layer(matrix: np.ndarray) -> np.ndarray:
+    """Satu iterasi EBS9 sesuai kode lama"""
     m = _permutation_9(matrix)
     m = _transpose_matrix(m)
     m = _circular_right_shift_cols(m, 70)
@@ -168,6 +198,7 @@ def _one_iteration_9layer(matrix: np.ndarray) -> np.ndarray:
 
 
 def _one_iteration_9layer_inv(matrix: np.ndarray) -> np.ndarray:
+    """Inverse satu iterasi EBS9 sesuai kode lama"""
     m = _even_odd_interchange(matrix)
     m = _three_way_separation_inv(m)
     m = _transpose_matrix(m)
@@ -181,6 +212,7 @@ def _one_iteration_9layer_inv(matrix: np.ndarray) -> np.ndarray:
 
 
 def _ebs9_encrypt(text: str) -> tuple[np.ndarray, int]:
+    """Proses enkripsi EBS9 sesuai kode lama (6 iterasi)"""
     original_len = len(text.encode("utf-8"))
     m = _text_to_byte_matrix(text)
     for _ in range(6):
@@ -189,6 +221,7 @@ def _ebs9_encrypt(text: str) -> tuple[np.ndarray, int]:
 
 
 def _ebs9_decrypt(matrix: np.ndarray, original_len: int) -> str:
+    """Proses dekripsi EBS9 sesuai kode lama (6 iterasi)"""
     m = matrix.copy()
     for _ in range(6):
         m = _one_iteration_9layer_inv(m)
@@ -205,9 +238,8 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     data_bits = np.unpackbits(encrypted_matrix.ravel())
     n_bits = data_bits.size
 
-    header = struct.pack('>II', original_len, n_bits)
-    header_bits = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
-    full_bits = np.concatenate([header_bits, data_bits])
+    # TANPA header (sama seperti kode lama)
+    full_bits = data_bits
 
     stego_arr = _embed_to_edges(cover_gray, full_bits, edge_indices)
     stego_img = Image.fromarray(stego_arr, mode="L")
@@ -220,41 +252,41 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
     return {
         "stego_img": stego_img,
+        "original_len": original_len,
+        "n_bits": n_bits,
         "timing": {"embed_seconds": t_embed},
         "metrics": {**fr, **nr},
     }
 
 
-def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
+def extract(stego_img: Image.Image, original_len: int = None, n_bits: int = None) -> dict:
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(img_gray)
 
-    total_edge_bits = len(edge_indices)
-    if total_edge_bits < 64:
-        raise ValueError(f"Edge tidak cukup untuk ekstraksi. Tersedia: {total_edge_bits}, minimal: 64")
-
-    header_bits = _extract_from_edges(img_gray, 64, edge_indices)
-    header_bytes = np.packbits(header_bits).tobytes()
-    original_len, n_bits = struct.unpack('>II', header_bytes)
-
-    max_possible_bytes = total_edge_bits // 8
-    if original_len <= 0 or original_len > max_possible_bytes:
-        raise ValueError(f"Header tidak valid: original_len={original_len} (maks: {max_possible_bytes})")
-    if n_bits <= 0 or n_bits > total_edge_bits - 64:
-        raise ValueError(f"Header tidak valid: n_bits={n_bits} (maks: {total_edge_bits - 64})")
-
-    total_bits = 64 + n_bits
-    if total_edge_bits < total_bits:
-        raise ValueError(f"Edge tidak cukup. Dibutuhkan: {total_bits}, tersedia: {total_edge_bits}")
-
-    all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
-    data_bits = all_bits[64:total_bits]
+    # Jika original_len dan n_bits tidak diberikan, kita harus mengekstrak semuanya
+    # Ini untuk kompatibilitas dengan cara lama (semua edge digunakan)
+    if original_len is None or n_bits is None:
+        # Ekstrak semua edge yang tersedia
+        total_bits = min(len(edge_indices), img_gray.size)
+        all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
+        data_bits = all_bits
+        n_bits = len(data_bits)
+    else:
+        # Ekstrak sesuai dengan panjang yang diketahui
+        if len(edge_indices) < n_bits:
+            raise ValueError(f"Edge tidak cukup. Dibutuhkan: {n_bits}, tersedia: {len(edge_indices)}")
+        data_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
 
     expected_bytes = (n_bits + 7) // 8
     packed = np.packbits(data_bits[:expected_bytes * 8])
+
+    # Coba tebak original_len dari data jika tidak diberikan
+    if original_len is None:
+        # Asumsikan semua data adalah teks yang valid
+        original_len = len(packed)
 
     rows = (original_len + 7) // 8
     cols = 8

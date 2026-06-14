@@ -31,19 +31,28 @@ class EBS9Handler:
         time_layer1 = round(time.perf_counter() - t1_start, 6)
 
         mri_stego_img = result_l1["stego_img"]
+        original_len = result_l1["original_len"]
+        n_bits = result_l1["n_bits"]
 
         buf = io.BytesIO()
         mri_stego_img.save(buf, format='PNG', compress_level=3)
         mri_stego_bytes = buf.getvalue()
 
+        # Simpan metadata ke dalam stego photo (menggunakan LSB di awal)
+        # Format: [original_len:4 bytes][n_bits:4 bytes][mri_stego_bytes]
+        import struct
+        metadata = struct.pack('>II', original_len, n_bits)
+        data_to_embed = metadata + mri_stego_bytes
+
         photo_full_capacity = (photo_h * photo_w * 3 // 8) - 4
-        if len(mri_stego_bytes) > photo_full_capacity:
+        if len(data_to_embed) > photo_full_capacity:
             raise ValueError(
-                f"MRI stego terlalu besar. Kapasitas foto: {photo_full_capacity} bytes."
+                f"Data terlalu besar. Kapasitas foto: {photo_full_capacity} bytes."
             )
 
         t2_start = time.perf_counter()
-        stego_img = LSBHandler.embed_to_rgb_full(img_photo, mri_stego_img)
+        # Embed data ke photo (bukan image ke image)
+        stego_img = LSBHandler.embed_to_rgb_full_with_bytes(img_photo, data_to_embed)
         time_layer2 = round(time.perf_counter() - t2_start, 6)
 
         time_total = round(time_layer1 + time_layer2, 6)
@@ -57,6 +66,8 @@ class EBS9Handler:
         return {
             "stego_img": stego_img,
             "mri_stego_img": mri_stego_img,
+            "original_len": original_len,
+            "n_bits": n_bits,
             "timing": {
                 "layer1_seconds": time_layer1,
                 "layer2_seconds": time_layer2,
@@ -74,14 +85,23 @@ class EBS9Handler:
         orig_txt: str | None = None,
     ) -> dict:
         t2_start = time.perf_counter()
-        extracted_mri_img = LSBHandler.extract_from_rgb_full(stego_img)
+        # Extract data bytes dari photo
+        extracted_data = LSBHandler.extract_from_rgb_full_bytes(stego_img)
         time_layer2 = round(time.perf_counter() - t2_start, 6)
 
-        if extracted_mri_img is None:
-            raise ValueError("Gagal mengekstrak MRI dari stego.")
+        if extracted_data is None or len(extracted_data) < 8:
+            raise ValueError("Gagal mengekstrak data dari stego.")
+
+        # Baca metadata
+        import struct
+        original_len, n_bits = struct.unpack('>II', extracted_data[:8])
+        mri_stego_bytes = extracted_data[8:]
+
+        # Rekonstruksi MRI stego dari bytes
+        extracted_mri_img = Image.open(io.BytesIO(mri_stego_bytes)).convert('L')
 
         t1_start = time.perf_counter()
-        result_l1 = ebs9.extract(extracted_mri_img)
+        result_l1 = ebs9.extract(extracted_mri_img, original_len, n_bits)
         time_layer1 = round(time.perf_counter() - t1_start, 6)
 
         decrypted = result_l1["recovered_text"]
