@@ -131,14 +131,11 @@ class LSBHandler:
         return Image.open(io.BytesIO(data_bytes))
 
     # ============================================================
-    # METHOD BARU UNTUK EBS3 (tidak mempengaruhi StegaShield)
+    # METHOD UNTUK EBS3/EBS5/EBS9 (tidak mempengaruhi StegaShield)
     # ============================================================
     @staticmethod
     def embed_to_rgb_full_with_bytes(cover_img: Image.Image, data_bytes: bytes) -> Image.Image:
-        """
-        EBS3 menggunakan method ini untuk embed bytes langsung.
-        TIDAK mempengaruhi StegaShield.
-        """
+        """Embed bytes langsung ke RGB image (tanpa intermediate image)."""
         cover_array = np.array(cover_img.convert('RGB'), dtype=np.uint8)
         height, width, _ = cover_array.shape
         bits, n_bits = LSBHandler._pack_data(data_bytes)
@@ -151,10 +148,7 @@ class LSBHandler:
 
     @staticmethod
     def extract_from_rgb_full_bytes(stego_img: Image.Image) -> bytes | None:
-        """
-        EBS3 menggunakan method ini untuk extract bytes langsung.
-        TIDAK mempengaruhi StegaShield.
-        """
+        """Extract bytes langsung dari RGB image."""
         img_array = np.array(stego_img.convert('RGB'), dtype=np.uint8)
         flat = img_array.ravel()
         if flat.size < 32:
