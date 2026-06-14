@@ -42,7 +42,7 @@ export interface VisualizationPaths {
   photo_lsb_map: string | null;
 }
 
-export interface EmbedTime {
+export interface LayerTiming {
   layer1_seconds: number;
   layer2_seconds: number;
   total_seconds: number;
@@ -67,8 +67,8 @@ export interface RecordFileSizes {
   original_mri_kb: number;
   original_photo_kb: number;
   stego_kb: number;
-  vis_mri_kb: number;
-  vis_photo_kb: number;
+  vis_mri_kb?: number;
+  vis_photo_kb?: number;
 }
 
 export interface UploadMedicalResponse {
@@ -76,7 +76,7 @@ export interface UploadMedicalResponse {
   record_id: number;
   method: StegoMethod;
   stego_image: string;
-  embed_time: EmbedTime;
+  mbed_time: LayerTiming;
   quality_metrics: {
     layer1_mri_stego: QualityMetrics;
     layer2_photo_stego: QualityMetrics;
@@ -91,7 +91,7 @@ export interface ExtractMedicalResponse {
   method: StegoMethod;
   medical_data: string;
   extract_time_seconds: number;
-  extract_time_per_layer: EmbedTime;
+  extract_time_per_layer: LayerTiming;
   stego_image: string;
   photo_path: string;
   mri_path: string;
@@ -111,7 +111,7 @@ export interface MedicalRecordItem {
   photo_path: string;
   mri_path: string;
   stego_photo_path: string;
-  visualization: VisualizationPaths;
+  visualization?: VisualizationPaths | null;
   upload_date: string | null;
   quality_metrics: MedicalQualityMetrics;
   file_sizes: RecordFileSizes;

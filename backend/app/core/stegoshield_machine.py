@@ -1,9 +1,19 @@
+from __future__ import annotations
+
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+from Crypto.Random import get_random_bytes
+import base64
+import hashlib
+import hmac
+import unicodedata
+
 from PIL import Image
 import numpy as np
 import struct
 import io
 from joblib import load
-from os.path import dirname, join, abspath
+from os.path import dirname, join
 from app.core.nriqa.brisque import brisque
 from app.core.nriqa.niqe import niqe
 from app.core.nriqa.piqe import piqe
@@ -26,11 +36,89 @@ def _get_svr_model():
             model_data = load(_SVR_MODEL_PATH)
             _svr_model = model_data['model']
             _scaler = model_data['scaler']
-        except Exception as e:
-            print(f"Warning: Failed to load BRISQUE model: {e}")
+        except Exception:
             _svr_model = None
             _scaler = None
     return _svr_model, _scaler
+
+
+class AESHandler:
+    def __init__(self, key: str):
+        if not key or len(key) == 0:
+            raise ValueError("AES key cannot be empty")
+
+        key_bytes = key.encode('utf-8')
+        self.enc_key = hashlib.sha256(key_bytes).digest()[:16]
+        self.mac_key = hashlib.sha256(key_bytes + b'mac').digest()
+
+    def _normalize_plaintext(self, plaintext: str) -> str:
+        text = unicodedata.normalize('NFC', plaintext)
+        replacements = {
+            '\u201c': '"', '\u201d': '"',
+            '\u2018': "'", '\u2019': "'",
+            '\u2014': '-', '\u2013': '-',
+            '\u2026': '...', '\u00a0': ' ',
+            '\u200b': '', '\u200c': '', '\u200d': '',
+        }
+        for src, dst in replacements.items():
+            text = text.replace(src, dst)
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        return text
+
+    def _compute_hmac(self, ciphertext_b64: str, iv_b64: str) -> str:
+        message = (ciphertext_b64 + "::" + iv_b64).encode('utf-8')
+        return base64.b64encode(
+            hmac.new(self.mac_key, message, hashlib.sha256).digest()
+        ).decode('utf-8')
+
+    def _verify_hmac(self, ciphertext_b64: str, iv_b64: str, mac_b64: str) -> None:
+        if not mac_b64:
+            raise ValueError("MAC tidak boleh kosong")
+        expected = self._compute_hmac(ciphertext_b64, iv_b64)
+        if not hmac.compare_digest(expected, mac_b64):
+            raise ValueError("Verifikasi integritas data gagal: data mungkin telah dimanipulasi.")
+
+    def encrypt(self, plaintext: str) -> dict:
+        if not plaintext:
+            raise ValueError("Plaintext tidak boleh kosong")
+        plaintext = self._normalize_plaintext(plaintext)
+        iv = get_random_bytes(16)
+        cipher = AES.new(self.enc_key, AES.MODE_CBC, iv)
+        plaintext_bytes = plaintext.encode('utf-8')
+        padded_data = pad(plaintext_bytes, AES.block_size)
+        ciphertext = cipher.encrypt(padded_data)
+        ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
+        iv_b64 = base64.b64encode(iv).decode('utf-8')
+        mac_b64 = self._compute_hmac(ciphertext_b64, iv_b64)
+        return {
+            'ciphertext': ciphertext_b64,
+            'iv': iv_b64,
+            'mac': mac_b64,
+        }
+
+    def decrypt(self, ciphertext_b64: str, iv_b64: str, mac_b64: str = None) -> str:
+        if not ciphertext_b64 or not iv_b64:
+            raise ValueError("Ciphertext dan IV tidak boleh kosong")
+        if mac_b64 is not None:
+            self._verify_hmac(ciphertext_b64, iv_b64, mac_b64)
+        try:
+            ciphertext = base64.b64decode(ciphertext_b64)
+            iv = base64.b64decode(iv_b64)
+        except Exception as e:
+            raise ValueError(f"Gagal decode Base64: {str(e)}")
+        if len(iv) != 16:
+            raise ValueError("IV tidak valid: panjang harus 16 byte.")
+        if len(ciphertext) == 0 or len(ciphertext) % AES.block_size != 0:
+            raise ValueError("Ciphertext tidak valid: panjang tidak sesuai blok AES.")
+        try:
+            cipher = AES.new(self.enc_key, AES.MODE_CBC, iv)
+            decrypted_padded = cipher.decrypt(ciphertext)
+            plaintext_bytes = unpad(decrypted_padded, AES.block_size)
+            plaintext = plaintext_bytes.decode('utf-8')
+            plaintext = self._normalize_plaintext(plaintext)
+            return plaintext
+        except Exception as e:
+            raise ValueError(f"Gagal dekripsi: {str(e)}")
 
 
 def _shuffled_indices(indices: np.ndarray) -> np.ndarray:
@@ -103,11 +191,10 @@ class LSBHandler:
 
     @staticmethod
     def embed_to_rgb_full(cover_img: Image.Image, secret_img: Image.Image) -> Image.Image:
-        """StegaShield menggunakan method ini - TIDAK BERUBAH"""
         cover_array = np.array(cover_img.convert('RGB'), dtype=np.uint8)
         height, width, _ = cover_array.shape
         buf = io.BytesIO()
-        secret_img.save(buf, format='PNG', compress_level=3)
+        secret_img.save(buf, format='PNG', compress_level=1)
         secret_bytes = buf.getvalue()
         bits, n_bits = LSBHandler._pack_data(secret_bytes)
         total_capacity = height * width * 3
@@ -119,7 +206,6 @@ class LSBHandler:
 
     @staticmethod
     def extract_from_rgb_full(stego_img: Image.Image) -> Image.Image | None:
-        """StegaShield menggunakan method ini - TIDAK BERUBAH"""
         img_array = np.array(stego_img.convert('RGB'), dtype=np.uint8)
         flat = img_array.ravel()
         if flat.size < 32:
@@ -130,12 +216,8 @@ class LSBHandler:
             return None
         return Image.open(io.BytesIO(data_bytes))
 
-    # ============================================================
-    # METHOD UNTUK EBS3/EBS5/EBS9 (tidak mempengaruhi StegaShield)
-    # ============================================================
     @staticmethod
     def embed_to_rgb_full_with_bytes(cover_img: Image.Image, data_bytes: bytes) -> Image.Image:
-        """Embed bytes langsung ke RGB image (tanpa intermediate image)."""
         cover_array = np.array(cover_img.convert('RGB'), dtype=np.uint8)
         height, width, _ = cover_array.shape
         bits, n_bits = LSBHandler._pack_data(data_bytes)
@@ -148,7 +230,6 @@ class LSBHandler:
 
     @staticmethod
     def extract_from_rgb_full_bytes(stego_img: Image.Image) -> bytes | None:
-        """Extract bytes langsung dari RGB image."""
         img_array = np.array(stego_img.convert('RGB'), dtype=np.uint8)
         flat = img_array.ravel()
         if flat.size < 32:
@@ -167,9 +248,18 @@ class LSBHandler:
                 ),
                 dtype=np.float64,
             )
-        mse_val = mse(orig, steg)
-        psnr_val = psnr(orig, steg)
-        ssim_val = ssim(orig, steg)
+        try:
+            mse_val = mse(orig, steg)
+        except Exception:
+            mse_val = 0.0
+        try:
+            psnr_val = psnr(orig, steg)
+        except Exception:
+            psnr_val = 0.0
+        try:
+            ssim_val = ssim(orig, steg)
+        except Exception:
+            ssim_val = 0.0
         return {
             'mse': round(max(0.0, mse_val), 6),
             'psnr': round(max(0.0, psnr_val), 4),
@@ -178,9 +268,9 @@ class LSBHandler:
 
     @staticmethod
     def calculate_nriqa_metrics(img: Image.Image, mode: str = 'L') -> dict:
-        brisque_score = None
-        niqe_score = None
-        piqe_score = None
+        brisque_score = 0.0
+        niqe_score = 0.0
+        piqe_score = 0.0
 
         try:
             img_bgr = np.array(img.convert('RGB'))[:, :, ::-1]
@@ -191,29 +281,25 @@ class LSBHandler:
                 if clf is not None and scaler is not None:
                     features_scaled = scaler.transform(features)
                     brisque_score = round(float(clf.predict(features_scaled)[0]), 4)
-                else:
-                    brisque_score = 50.0
             except Exception:
-                brisque_score = 50.0
+                pass
 
             try:
                 niqe_score = round(float(niqe(img_bgr.copy())), 4)
             except Exception:
-                niqe_score = 10.0
+                pass
 
             try:
                 score, _, _, _ = piqe(img_bgr.copy())
                 piqe_score = round(float(score), 4)
             except Exception:
-                piqe_score = 40.0
+                pass
 
         except Exception:
-            brisque_score = 50.0
-            niqe_score = 10.0
-            piqe_score = 40.0
+            pass
 
         return {
             'brisque': brisque_score,
             'niqe': niqe_score,
-            'piqe': piqe_score
+            'piqe': piqe_score,
         }
