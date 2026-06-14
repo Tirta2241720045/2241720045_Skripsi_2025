@@ -118,49 +118,43 @@ def _even_odd_interchange(matrix: np.ndarray) -> np.ndarray:
     return result
 
 
-def _transpose_matrix(matrix: np.ndarray) -> np.ndarray:
-    return matrix.T.copy()
+def _initial_permutation_5(matrix: np.ndarray) -> np.ndarray:
+    """Initial permutation untuk EBS5 (sesuai kode lama)"""
+    perm = np.array([1, 5, 3, 7, 2, 6, 0, 4])
+    return matrix[:, perm % matrix.shape[1]]
 
 
-_RNG_SBOX_5 = np.random.default_rng(20240201)
-_SBOX_5 = _RNG_SBOX_5.permutation(256).astype(np.uint8)
-_SBOX_5_INV = np.argsort(_SBOX_5).astype(np.uint8)
-
-
-def _apply_sbox_5(matrix: np.ndarray, box: np.ndarray) -> np.ndarray:
-    return box[matrix]
-
-
-def _one_iteration_5layer(matrix: np.ndarray) -> np.ndarray:
-    m = _apply_sbox_5(matrix, _SBOX_5)
-    m = _transpose_matrix(m)
-    m = _circular_right_shift_cols(m, 37)
-    m = _xor_left_right(m)
-    m = _even_odd_interchange(m)
-    return m
-
-
-def _one_iteration_5layer_inv(matrix: np.ndarray) -> np.ndarray:
-    m = _even_odd_interchange(matrix)
-    m = _xor_left_right_inv(m)
-    m = _circular_right_shift_cols(m, -37)
-    m = _transpose_matrix(m)
-    m = _apply_sbox_5(m, _SBOX_5_INV)
-    return m
+def _initial_permutation_5_inv(matrix: np.ndarray) -> np.ndarray:
+    """Inverse initial permutation untuk EBS5 (sesuai kode lama)"""
+    perm = np.array([1, 5, 3, 7, 2, 6, 0, 4])
+    inv = np.argsort(perm % matrix.shape[1])
+    return matrix[:, inv]
 
 
 def _ebs5_encrypt(text: str) -> tuple[np.ndarray, int]:
+    """Proses enkripsi EBS5 sesuai kode lama"""
     original_len = len(text.encode("utf-8"))
     m = _text_to_byte_matrix(text)
-    for _ in range(5):
-        m = _one_iteration_5layer(m)
+
+    m = _initial_permutation_5(m)
+    m = _circular_right_shift_cols(m, 4)
+    m = _xor_left_right(m)
+    m = _even_odd_interchange(m)
+    m = _initial_permutation_5_inv(m)
+
     return m, original_len
 
 
 def _ebs5_decrypt(matrix: np.ndarray, original_len: int) -> str:
+    """Proses dekripsi EBS5 sesuai kode lama"""
     m = matrix.copy()
-    for _ in range(5):
-        m = _one_iteration_5layer_inv(m)
+
+    m = _initial_permutation_5(m)
+    m = _even_odd_interchange(m)
+    m = _xor_left_right_inv(m)
+    m = _circular_right_shift_cols(m, -4)
+    m = _initial_permutation_5_inv(m)
+
     return _byte_matrix_to_text(m, original_len)
 
 
@@ -174,9 +168,8 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     data_bits = np.unpackbits(encrypted_matrix.ravel())
     n_bits = data_bits.size
 
-    header = struct.pack('>II', original_len, n_bits)
-    header_bits = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
-    full_bits = np.concatenate([header_bits, data_bits])
+    # TANPA header (sama seperti kode lama)
+    full_bits = data_bits
 
     stego_arr = _embed_to_edges(cover_gray, full_bits, edge_indices)
     stego_img = Image.fromarray(stego_arr, mode="L")
@@ -189,41 +182,41 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
     return {
         "stego_img": stego_img,
+        "original_len": original_len,
+        "n_bits": n_bits,
         "timing": {"embed_seconds": t_embed},
         "metrics": {**fr, **nr},
     }
 
 
-def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
+def extract(stego_img: Image.Image, original_len: int = None, n_bits: int = None) -> dict:
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(img_gray)
 
-    total_edge_bits = len(edge_indices)
-    if total_edge_bits < 64:
-        raise ValueError(f"Edge tidak cukup untuk ekstraksi. Tersedia: {total_edge_bits}, minimal: 64")
-
-    header_bits = _extract_from_edges(img_gray, 64, edge_indices)
-    header_bytes = np.packbits(header_bits).tobytes()
-    original_len, n_bits = struct.unpack('>II', header_bytes)
-
-    max_possible_bytes = total_edge_bits // 8
-    if original_len <= 0 or original_len > max_possible_bytes:
-        raise ValueError(f"Header tidak valid: original_len={original_len} (maks: {max_possible_bytes})")
-    if n_bits <= 0 or n_bits > total_edge_bits - 64:
-        raise ValueError(f"Header tidak valid: n_bits={n_bits} (maks: {total_edge_bits - 64})")
-
-    total_bits = 64 + n_bits
-    if total_edge_bits < total_bits:
-        raise ValueError(f"Edge tidak cukup. Dibutuhkan: {total_bits}, tersedia: {total_edge_bits}")
-
-    all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
-    data_bits = all_bits[64:total_bits]
+    # Jika original_len dan n_bits tidak diberikan, kita harus mengekstrak semuanya
+    # Ini untuk kompatibilitas dengan cara lama (semua edge digunakan)
+    if original_len is None or n_bits is None:
+        # Ekstrak semua edge yang tersedia
+        total_bits = min(len(edge_indices), img_gray.size)
+        all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
+        data_bits = all_bits
+        n_bits = len(data_bits)
+    else:
+        # Ekstrak sesuai dengan panjang yang diketahui
+        if len(edge_indices) < n_bits:
+            raise ValueError(f"Edge tidak cukup. Dibutuhkan: {n_bits}, tersedia: {len(edge_indices)}")
+        data_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
 
     expected_bytes = (n_bits + 7) // 8
     packed = np.packbits(data_bits[:expected_bytes * 8])
+
+    # Coba tebak original_len dari data jika tidak diberikan
+    if original_len is None:
+        # Asumsikan semua data adalah teks yang valid
+        original_len = len(packed)
 
     rows = (original_len + 7) // 8
     cols = 8
