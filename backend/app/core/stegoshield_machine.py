@@ -12,34 +12,12 @@ from PIL import Image
 import numpy as np
 import struct
 import io
-from joblib import load
-from os.path import dirname, join
 from app.core.nriqa.brisque import brisque
 from app.core.nriqa.niqe import niqe
 from app.core.nriqa.piqe import piqe
 from app.core.friqa.mse import mse
 from app.core.friqa.psnr import psnr
 from app.core.friqa.ssim import ssim
-
-_CURRENT_DIR = dirname(__file__)
-_CORE_DIR = dirname(dirname(_CURRENT_DIR))
-_SVR_MODEL_PATH = join(_CORE_DIR, 'nriqa', 'svr_brisque.joblib')
-
-_svr_model = None
-_scaler = None
-
-
-def _get_svr_model():
-    global _svr_model, _scaler
-    if _svr_model is None:
-        try:
-            model_data = load(_SVR_MODEL_PATH)
-            _svr_model = model_data['model']
-            _scaler = model_data['scaler']
-        except Exception:
-            _svr_model = None
-            _scaler = None
-    return _svr_model, _scaler
 
 
 class AESHandler:
@@ -261,9 +239,9 @@ class LSBHandler:
         except Exception:
             ssim_val = 0.0
         return {
-            'mse': round(max(0.0, mse_val), 6),
-            'psnr': round(max(0.0, psnr_val), 4),
-            'ssim': round(max(0.0, min(ssim_val, 1.0)), 6),
+            'mse': mse_val,
+            'psnr': psnr_val,
+            'ssim': ssim_val,
         }
 
     @staticmethod
@@ -276,22 +254,18 @@ class LSBHandler:
             img_bgr = np.array(img.convert('RGB'))[:, :, ::-1]
 
             try:
-                features = brisque(img_bgr.copy()).reshape(1, -1)
-                clf, scaler = _get_svr_model()
-                if clf is not None and scaler is not None:
-                    features_scaled = scaler.transform(features)
-                    brisque_score = round(float(clf.predict(features_scaled)[0]), 4)
+                brisque_score = brisque(img_bgr.copy())
             except Exception:
                 pass
 
             try:
-                niqe_score = round(float(niqe(img_bgr.copy())), 4)
+                niqe_score = float(niqe(img_bgr.copy()))
             except Exception:
                 pass
 
             try:
                 score, _, _, _ = piqe(img_bgr.copy())
-                piqe_score = round(float(score), 4)
+                piqe_score = float(score)
             except Exception:
                 pass
 

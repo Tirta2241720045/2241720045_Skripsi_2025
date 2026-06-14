@@ -4,30 +4,9 @@ import math
 import numpy as np
 import cv2
 from PIL import Image
-from joblib import load
-from os.path import dirname, join
 from app.core.nriqa.brisque import brisque
 from app.core.nriqa.niqe import niqe
 from app.core.nriqa.piqe import piqe
-
-_CURRENT_DIR = dirname(dirname(dirname(__file__)))
-_SVR_MODEL_PATH = join(_CURRENT_DIR, 'nriqa', 'svr_brisque.joblib')
-
-_svr_model = None
-_scaler = None
-
-
-def _get_svr_model():
-    global _svr_model, _scaler
-    if _svr_model is None:
-        try:
-            model_data = load(_SVR_MODEL_PATH)
-            _svr_model = model_data['model']
-            _scaler = model_data['scaler']
-        except Exception:
-            _svr_model = None
-            _scaler = None
-    return _svr_model, _scaler
 
 
 def _pil_to_cv2_gray(img: Image.Image) -> np.ndarray:
@@ -43,13 +22,13 @@ def compute_metrics(original: np.ndarray, stego: np.ndarray) -> dict:
     steg = stego.astype(np.float64)
     if orig.shape != steg.shape:
         steg = cv2.resize(steg.astype(np.float32), (orig.shape[1], orig.shape[0])).astype(np.float64)
-    mse = float(np.mean((orig - steg) ** 2))
-    psnr = 100.0 if mse == 0 else min(10 * math.log10(255.0 ** 2 / mse), 100.0)
-    ssim = _ssim(orig, steg)
+    mse_val = float(np.mean((orig - steg) ** 2))
+    psnr_val = 100.0 if mse_val == 0 else min(10 * math.log10(255.0 ** 2 / mse_val), 100.0)
+    ssim_val = _ssim(orig, steg)
     return {
-        "mse": round(mse, 6),
-        "psnr": round(psnr, 4),
-        "ssim": round(max(0.0, min(ssim, 1.0)), 6),
+        "mse": mse_val,
+        "psnr": psnr_val,
+        "ssim": ssim_val,
     }
 
 
@@ -78,22 +57,18 @@ def compute_nriqa(img: Image.Image) -> dict:
         img_bgr = np.array(img.convert('RGB'))[:, :, ::-1]
 
         try:
-            features = brisque(img_bgr.copy()).reshape(1, -1)
-            clf, scaler = _get_svr_model()
-            if clf is not None and scaler is not None:
-                features_scaled = scaler.transform(features)
-                brisque_score = round(float(clf.predict(features_scaled)[0]), 4)
+            brisque_score = brisque(img_bgr.copy())
         except Exception:
             pass
 
         try:
-            niqe_score = round(float(niqe(img_bgr.copy())), 4)
+            niqe_score = float(niqe(img_bgr.copy()))
         except Exception:
             pass
 
         try:
             score, _, _, _ = piqe(img_bgr.copy())
-            piqe_score = round(float(score), 4)
+            piqe_score = float(score)
         except Exception:
             pass
 

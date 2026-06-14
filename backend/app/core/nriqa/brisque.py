@@ -2,6 +2,8 @@ import math
 import numpy as np
 import cv2
 import scipy.special
+from joblib import load
+from os.path import dirname, join
 
 gamma_range = np.arange(0.2, 10, 0.001)
 _a = scipy.special.gamma(2.0 / gamma_range)
@@ -9,6 +11,25 @@ _a *= _a
 _b = scipy.special.gamma(1.0 / gamma_range)
 _c = scipy.special.gamma(3.0 / gamma_range)
 prec_gammas = _a / (_b * _c)
+
+_CURRENT_DIR = dirname(__file__)
+_SVR_MODEL_PATH = join(_CURRENT_DIR, 'svr_brisque.joblib')
+
+_svr_model = None
+_scaler = None
+
+
+def _get_svr_model():
+    global _svr_model, _scaler
+    if _svr_model is None:
+        try:
+            model_data = load(_SVR_MODEL_PATH)
+            _svr_model = model_data['model']
+            _scaler = model_data['scaler']
+        except Exception:
+            _svr_model = None
+            _scaler = None
+    return _svr_model, _scaler
 
 
 def aggd_features(imdata):
@@ -95,4 +116,9 @@ def brisque(im):
     low_res = cv2.resize(im, (0, 0), fx=0.5, fy=0.5)
     mscncoefs2 = calculate_mscn(low_res)
     features2 = extract_brisque_feats(mscncoefs2)
-    return np.array(features1 + features2)
+    features = np.array(features1 + features2)
+    clf, scaler = _get_svr_model()
+    if clf is not None and scaler is not None:
+        features_scaled = scaler.transform(features.reshape(1, -1))
+        return float(clf.predict(features_scaled)[0])
+    return 0.0
