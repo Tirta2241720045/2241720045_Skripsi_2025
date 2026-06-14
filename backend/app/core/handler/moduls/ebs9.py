@@ -122,18 +122,12 @@ def _transpose_matrix(matrix: np.ndarray) -> np.ndarray:
 
 
 def _three_way_separation(matrix: np.ndarray) -> np.ndarray:
-    """
-    Three way separation - SAMA PERSIS dengan kode lama
-    Tidak mengubah shape matrix, hanya meracik ulang data
-    """
     flat = matrix.ravel()
     n = len(flat)
     third = (n + 2) // 3
     
-    # Simpan shape asli
     original_shape = matrix.shape
     
-    # Pad jika perlu (untuk perhitungan sementara)
     if n % 3 != 0:
         pad_size = third * 3 - n
         flat_padded = np.pad(flat, (0, pad_size), constant_values=0)
@@ -145,27 +139,18 @@ def _three_way_separation(matrix: np.ndarray) -> np.ndarray:
     part3 = flat_padded[2*third:]
     
     result_padded = np.concatenate([part3, part1, part2])
-    
-    # Kembalikan ke ukuran asli (buang padding)
     result = result_padded[:n]
     
-    # Kembalikan ke shape asli
     return result.reshape(original_shape)
 
 
 def _three_way_separation_inv(matrix: np.ndarray) -> np.ndarray:
-    """
-    Inverse three way separation - SAMA PERSIS dengan kode lama
-    Tidak mengubah shape matrix, hanya meracik ulang data
-    """
     flat = matrix.ravel()
     n = len(flat)
     third = (n + 2) // 3
     
-    # Simpan shape asli
     original_shape = matrix.shape
     
-    # Pad jika perlu (untuk perhitungan sementara)
     if n % 3 != 0:
         pad_size = third * 3 - n
         flat_padded = np.pad(flat, (0, pad_size), constant_values=0)
@@ -177,29 +162,23 @@ def _three_way_separation_inv(matrix: np.ndarray) -> np.ndarray:
     part2 = flat_padded[2*third:]
     
     result_padded = np.concatenate([part1, part2, part3])
-    
-    # Kembalikan ke ukuran asli (buang padding)
     result = result_padded[:n]
     
-    # Kembalikan ke shape asli
     return result.reshape(original_shape)
 
 
 def _permutation_9(matrix: np.ndarray) -> np.ndarray:
-    """Permutation untuk EBS9 sesuai kode lama"""
     perm = np.array([2, 6, 0, 4, 1, 5, 3, 7])
     return matrix[:, perm % matrix.shape[1]]
 
 
 def _permutation_9_inv(matrix: np.ndarray) -> np.ndarray:
-    """Inverse permutation untuk EBS9 sesuai kode lama"""
     perm = np.array([2, 6, 0, 4, 1, 5, 3, 7])
     inv = np.argsort(perm % matrix.shape[1])
     return matrix[:, inv]
 
 
 def _one_iteration_9layer(matrix: np.ndarray) -> np.ndarray:
-    """Satu iterasi EBS9 sesuai kode lama"""
     m = _permutation_9(matrix)
     m = _transpose_matrix(m)
     m = _circular_right_shift_cols(m, 70)
@@ -213,7 +192,6 @@ def _one_iteration_9layer(matrix: np.ndarray) -> np.ndarray:
 
 
 def _one_iteration_9layer_inv(matrix: np.ndarray) -> np.ndarray:
-    """Inverse satu iterasi EBS9 sesuai kode lama"""
     m = _even_odd_interchange(matrix)
     m = _three_way_separation_inv(m)
     m = _transpose_matrix(m)
@@ -227,7 +205,6 @@ def _one_iteration_9layer_inv(matrix: np.ndarray) -> np.ndarray:
 
 
 def _ebs9_encrypt(text: str) -> tuple[np.ndarray, int]:
-    """Proses enkripsi EBS9 sesuai kode lama (6 iterasi)"""
     original_len = len(text.encode("utf-8"))
     m = _text_to_byte_matrix(text)
     for _ in range(6):
@@ -236,7 +213,6 @@ def _ebs9_encrypt(text: str) -> tuple[np.ndarray, int]:
 
 
 def _ebs9_decrypt(matrix: np.ndarray, original_len: int) -> str:
-    """Proses dekripsi EBS9 sesuai kode lama (6 iterasi)"""
     m = matrix.copy()
     for _ in range(6):
         m = _one_iteration_9layer_inv(m)
@@ -244,10 +220,6 @@ def _ebs9_decrypt(matrix: np.ndarray, original_len: int) -> str:
 
 
 def embed(cover_img: Image.Image, payload_text: str) -> dict:
-    """
-    Embed payload ke cover image menggunakan EBS9.
-    Kembalikan stego image + metadata (original_len, n_bits)
-    """
     cover_gray = _pil_to_gray(cover_img)
 
     t_start = time.perf_counter()
@@ -257,7 +229,7 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     data_bits = np.unpackbits(encrypted_matrix.ravel())
     n_bits = data_bits.size
 
-    # TANPA header (sama seperti kode lama)
+    # Langsung embed bits ke edge (tanpa header)
     full_bits = data_bits
 
     stego_arr = _embed_to_edges(cover_gray, full_bits, edge_indices)
@@ -278,23 +250,16 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     }
 
 
-def extract(stego_img: Image.Image, original_len: int = None, n_bits: int = None) -> dict:
+def extract(stego_img: Image.Image, original_len: int, n_bits: int) -> dict:
     """
     Ekstrak payload dari stego image menggunakan EBS9.
-    original_len dan n_bits harus diberikan dari metadata yang disimpan di photo.
+    original_len dan n_bits WAJIB diberikan (dari metadata di handler)
     """
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(img_gray)
-
-    # original_len dan n_bits WAJIB diberikan dari handler
-    if original_len is None or n_bits is None:
-        raise ValueError(
-            "EBS9 extract: original_len dan n_bits harus diberikan. "
-            "Metadata harus diekstrak dari photo terlebih dahulu."
-        )
 
     # Validasi edge cukup
     if len(edge_indices) < n_bits:

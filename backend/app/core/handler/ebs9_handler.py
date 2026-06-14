@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import time
-import struct
 import numpy as np
 from PIL import Image
 
@@ -45,22 +44,15 @@ class EBS9Handler:
         mri_stego_img.save(buf, format='PNG', compress_level=3)
         mri_stego_bytes = buf.getvalue()
 
-        # Siapkan metadata untuk disimpan di photo
-        # Format: [original_len:4 bytes][n_bits:4 bytes][mri_stego_bytes]
-        metadata = struct.pack('>II', original_len, n_bits)
-        data_to_embed = metadata + mri_stego_bytes
+        # SEDERHANA: Simpan metadata DI NAMA FILE (bukan di dalam gambar)
+        # Metadata akan disimpan di return dict, dan nanti saat extract,
+        # metadata akan diteruskan melalui parameter.
+        # Untuk keperluan persistensi, metadata bisa disimpan di database
+        # atau di nama file. Untuk sekarang, kita simpan di return.
 
-        # Hitung kapasitas photo
-        photo_full_capacity = (photo_h * photo_w * 3 // 8) - 4
-        if len(data_to_embed) > photo_full_capacity:
-            raise ValueError(
-                f"Data terlalu besar. Kapasitas foto: {photo_full_capacity} bytes, "
-                f"Data: {len(data_to_embed)} bytes"
-            )
-
-        # Layer 2: Embed bytes ke photo
+        # Layer 2: Embed MRI stego bytes ke photo (TANPA metadata di dalamnya)
         t2_start = time.perf_counter()
-        stego_img = LSBHandler.embed_to_rgb_full_with_bytes(img_photo, data_to_embed)
+        stego_img = LSBHandler.embed_to_rgb_full_with_bytes(img_photo, mri_stego_bytes)
         time_layer2 = round(time.perf_counter() - t2_start, 6)
 
         time_total = round(time_layer1 + time_layer2, 6)
@@ -95,29 +87,35 @@ class EBS9Handler:
     ) -> dict:
         """
         Ekstrak data dari stego photo.
-        Layer 2: Ekstrak bytes dari photo → dapat metadata + MRI stego bytes
-        Layer 1: EBS9 extract dari MRI stego → dapat teks asli
+        original_len dan n_bits harus diberikan melalui parameter.
         """
-        # Layer 2: Extract bytes dari photo
+        # Metadata harus diberikan melalui parameter
+        # Karena kita tidak menyimpan metadata di dalam gambar,
+        # maka original_len dan n_bits HARUS diambil dari database
+        # atau disimpan di nama file.
+        
+        # Untuk sementara, jika tidak ada metadata, raise error
+        if orig_txt is None:
+            raise ValueError(
+                "EBS9 extract: original_len dan n_bits tidak tersedia. "
+                "Metadata harus disimpan di database atau di nama file."
+            )
+        
+        # Asumsikan orig_txt berisi format "original_len:n_bits"
+        try:
+            parts = orig_txt.split(":")
+            original_len = int(parts[0])
+            n_bits = int(parts[1])
+        except (ValueError, IndexError):
+            raise ValueError(f"Format metadata tidak valid: {orig_txt}")
+
+        # Layer 2: Extract MRI stego bytes dari photo (tanpa metadata)
         t2_start = time.perf_counter()
-        extracted_data = LSBHandler.extract_from_rgb_full_bytes(stego_img)
+        mri_stego_bytes = LSBHandler.extract_from_rgb_full_bytes(stego_img)
         time_layer2 = round(time.perf_counter() - t2_start, 6)
 
-        if extracted_data is None or len(extracted_data) < 8:
-            raise ValueError(
-                f"Gagal mengekstrak data dari stego. "
-                f"Data length: {len(extracted_data) if extracted_data else 0}"
-            )
-
-        # Baca metadata (8 bytes pertama)
-        original_len, n_bits = struct.unpack('>II', extracted_data[:8])
-        mri_stego_bytes = extracted_data[8:]
-
-        # Validasi metadata
-        if original_len <= 0 or original_len > 1000000:  # Maks 1MB
-            raise ValueError(f"Metadata tidak valid: original_len={original_len}")
-        if n_bits <= 0 or n_bits > 100000000:  # Maks 100M bits
-            raise ValueError(f"Metadata tidak valid: n_bits={n_bits}")
+        if mri_stego_bytes is None or len(mri_stego_bytes) == 0:
+            raise ValueError("Gagal mengekstrak MRI stego dari photo.")
 
         # Rekonstruksi MRI stego dari bytes
         try:
