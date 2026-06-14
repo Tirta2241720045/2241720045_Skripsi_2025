@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 import numpy as np
-import cv2
 from PIL import Image
 
 from app.core.handler.moduls.lsb_handler import LSBHandler
@@ -12,7 +11,12 @@ def _pil_to_gray(img: Image.Image) -> np.ndarray:
     return np.array(img.convert("L"), dtype=np.uint8)
 
 
+# ---------------------------------------------------------------------------
+# Edge detection (sama persis dengan _shared.py lama)
+# ---------------------------------------------------------------------------
+
 def _detect_edges_prewitt(img_gray: np.ndarray, threshold: float = 0.025) -> np.ndarray:
+    import cv2
     img_float = img_gray.astype(np.float32)
     kernel_x = np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]], dtype=np.float32)
     kernel_y = np.array([[-1, -1, -1], [0, 0, 0], [1, 1, 1]], dtype=np.float32)
@@ -25,6 +29,7 @@ def _detect_edges_prewitt(img_gray: np.ndarray, threshold: float = 0.025) -> np.
 
 
 def _detect_edges_canny(img_gray: np.ndarray, low: int = 50, high: int = 100) -> np.ndarray:
+    import cv2
     edges = cv2.Canny(img_gray, low, high)
     return np.flatnonzero(edges.ravel())
 
@@ -38,6 +43,10 @@ def _detect_edges(img_gray: np.ndarray, min_edges: int = 500) -> np.ndarray:
         indices = np.arange(0, img_gray.size, step, dtype=np.int64)
     return indices.astype(np.int64)
 
+
+# ---------------------------------------------------------------------------
+# Embed / extract ke edge pixels (LSB)
+# ---------------------------------------------------------------------------
 
 def _embed_to_edges(img_gray: np.ndarray, bits: np.ndarray, edge_indices: np.ndarray) -> np.ndarray:
     stego = img_gray.copy()
@@ -54,11 +63,13 @@ def _embed_to_edges(img_gray: np.ndarray, bits: np.ndarray, edge_indices: np.nda
 
 def _extract_from_edges(stego_gray: np.ndarray, n_bits: int, edge_indices: np.ndarray) -> np.ndarray:
     flat = stego_gray.ravel()
-    if n_bits > len(edge_indices):
-        raise ValueError(f"Tidak cukup edge. Dibutuhkan: {n_bits}, tersedia: {len(edge_indices)}")
     targets = edge_indices[:n_bits]
     return (flat[targets] & 1).astype(np.uint8)
 
+
+# ---------------------------------------------------------------------------
+# Matrix helpers
+# ---------------------------------------------------------------------------
 
 def _text_to_byte_matrix(text: str) -> np.ndarray:
     import math as _math
@@ -125,22 +136,17 @@ def _three_way_separation(matrix: np.ndarray) -> np.ndarray:
     flat = matrix.ravel()
     n = len(flat)
     third = (n + 2) // 3
-    
     original_shape = matrix.shape
-    
     if n % 3 != 0:
         pad_size = third * 3 - n
         flat_padded = np.pad(flat, (0, pad_size), constant_values=0)
     else:
         flat_padded = flat
-    
     part1 = flat_padded[:third]
-    part2 = flat_padded[third:2*third]
-    part3 = flat_padded[2*third:]
-    
+    part2 = flat_padded[third:2 * third]
+    part3 = flat_padded[2 * third:]
     result_padded = np.concatenate([part3, part1, part2])
     result = result_padded[:n]
-    
     return result.reshape(original_shape)
 
 
@@ -148,24 +154,23 @@ def _three_way_separation_inv(matrix: np.ndarray) -> np.ndarray:
     flat = matrix.ravel()
     n = len(flat)
     third = (n + 2) // 3
-    
     original_shape = matrix.shape
-    
     if n % 3 != 0:
         pad_size = third * 3 - n
         flat_padded = np.pad(flat, (0, pad_size), constant_values=0)
     else:
         flat_padded = flat
-    
     part3 = flat_padded[:third]
-    part1 = flat_padded[third:2*third]
-    part2 = flat_padded[2*third:]
-    
+    part1 = flat_padded[third:2 * third]
+    part2 = flat_padded[2 * third:]
     result_padded = np.concatenate([part1, part2, part3])
     result = result_padded[:n]
-    
     return result.reshape(original_shape)
 
+
+# ---------------------------------------------------------------------------
+# EBS9 permutation & 9-layer iterations
+# ---------------------------------------------------------------------------
 
 def _permutation_9(matrix: np.ndarray) -> np.ndarray:
     perm = np.array([2, 6, 0, 4, 1, 5, 3, 7])
@@ -205,6 +210,7 @@ def _one_iteration_9layer_inv(matrix: np.ndarray) -> np.ndarray:
 
 
 def _ebs9_encrypt(text: str) -> tuple[np.ndarray, int]:
+    """Enkripsi teks → encrypted matrix + original_len (bytes UTF-8)."""
     original_len = len(text.encode("utf-8"))
     m = _text_to_byte_matrix(text)
     for _ in range(6):
@@ -219,20 +225,35 @@ def _ebs9_decrypt(matrix: np.ndarray, original_len: int) -> str:
     return _byte_matrix_to_text(m, original_len)
 
 
+# ---------------------------------------------------------------------------
+# Public API: embed & extract
+# ---------------------------------------------------------------------------
+
 def embed(cover_img: Image.Image, payload_text: str) -> dict:
-    """Embed payload ke cover image menggunakan EBS9."""
+    """
+    Embed payload ke cover image menggunakan EBS9.
+
+    Returns:
+        stego_img      : PIL Image (mode L)
+        original_len   : panjang teks dalam bytes UTF-8
+        n_bits         : jumlah bit yang di-embed (= rows*cols*8 dari encrypted matrix)
+        timing         : dict waktu proses
+        metrics        : FR + NR-IQA metrics
+    """
     cover_gray = _pil_to_gray(cover_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(cover_gray)
+
+    # Enkripsi → matrix shape (rows, 8), rows = ceil(original_len / 8)
     encrypted_matrix, original_len = _ebs9_encrypt(payload_text)
+
+    # Unpack bits dari seluruh matrix (rows * 8 bytes * 8 bits)
     data_bits = np.unpackbits(encrypted_matrix.ravel())
-    n_bits = data_bits.size
+    n_bits = data_bits.size  # = rows * 8 * 8
 
-    full_bits = data_bits
-
-    stego_arr = _embed_to_edges(cover_gray, full_bits, edge_indices)
+    stego_arr = _embed_to_edges(cover_gray, data_bits, edge_indices)
     stego_img = Image.fromarray(stego_arr, mode="L")
 
     t_embed = round(time.perf_counter() - t_start, 6)
@@ -243,15 +264,26 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
     return {
         "stego_img": stego_img,
-        "original_len": original_len,
-        "n_bits": n_bits,
+        "original_len": original_len,   # simpan ini ke DB
+        "n_bits": n_bits,               # simpan ini ke DB
         "timing": {"embed_seconds": t_embed},
         "metrics": {**fr, **nr},
     }
 
 
 def extract(stego_img: Image.Image, original_len: int, n_bits: int) -> dict:
-    """Ekstrak payload dari stego image menggunakan EBS9."""
+    """
+    Ekstrak payload dari stego image menggunakan EBS9.
+
+    Args:
+        stego_img    : PIL Image hasil embed
+        original_len : panjang teks asli dalam bytes (dari DB)
+        n_bits       : jumlah bit yang di-embed (dari DB, = rows*64)
+
+    Returns:
+        recovered_text : teks yang berhasil di-dekripsi
+        timing         : dict waktu proses
+    """
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
@@ -261,25 +293,29 @@ def extract(stego_img: Image.Image, original_len: int, n_bits: int) -> dict:
     if len(edge_indices) < n_bits:
         raise ValueError(
             f"Edge tidak cukup. Dibutuhkan: {n_bits} bits, "
-            f"tersedia: {len(edge_indices)} bits"
+            f"tersedia: {len(edge_indices)} bits."
         )
 
-    data_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
+    # Ambil bit dari edge pixels
+    extracted_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
 
-    expected_bytes = (n_bits + 7) // 8
-    packed = np.packbits(data_bits[:expected_bytes * 8])
-
-    rows = (original_len + 7) // 8
+    # Re-pack bits → bytes → reshape ke matrix yang sama dengan saat embed
+    # rows di-derive dari original_len, BUKAN dari n_bits
+    # (sama persis dengan logika _ebs9_encrypt)
+    import math
+    rows = max(1, math.ceil(original_len / 8))
     cols = 8
-    expected_matrix_size = rows * cols
+    expected_bytes = rows * cols
 
-    if len(packed) < expected_matrix_size:
+    packed = np.packbits(extracted_bits[:expected_bytes * 8])
+
+    if len(packed) < expected_bytes:
         raise ValueError(
-            f"Data tidak cukup. Dibutuhkan: {expected_matrix_size} bytes, "
-            f"tersedia: {len(packed)} bytes"
+            f"Data tidak cukup. Dibutuhkan: {expected_bytes} bytes, "
+            f"tersedia: {len(packed)} bytes."
         )
 
-    matrix = packed[:expected_matrix_size].reshape(rows, cols)
+    matrix = packed[:expected_bytes].reshape(rows, cols)
     recovered = _ebs9_decrypt(matrix, original_len)
 
     t_extract = round(time.perf_counter() - t_start, 6)
