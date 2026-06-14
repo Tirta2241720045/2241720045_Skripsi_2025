@@ -131,9 +131,7 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
     data_bits = np.unpackbits(encrypted_matrix.ravel())
     n_bits = data_bits.size
 
-    header = struct.pack('>II', original_len, n_bits)
-    header_bits = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
-    full_bits = np.concatenate([header_bits, data_bits])
+    full_bits = data_bits  # Tanpa header (sama seperti kode lama)
 
     stego_arr = _embed_to_edges(cover_gray, full_bits, edge_indices)
     stego_img = Image.fromarray(stego_arr, mode="L")
@@ -146,41 +144,41 @@ def embed(cover_img: Image.Image, payload_text: str) -> dict:
 
     return {
         "stego_img": stego_img,
+        "original_len": original_len,
+        "n_bits": n_bits,
         "timing": {"embed_seconds": t_embed},
         "metrics": {**fr, **nr},
     }
 
 
-def extract(stego_img: Image.Image, payload_text: str = None) -> dict:
+def extract(stego_img: Image.Image, original_len: int = None, n_bits: int = None) -> dict:
     img_gray = _pil_to_gray(stego_img)
 
     t_start = time.perf_counter()
 
     edge_indices = _detect_edges(img_gray)
 
-    total_edge_bits = len(edge_indices)
-    if total_edge_bits < 64:
-        raise ValueError(f"Edge tidak cukup untuk ekstraksi. Tersedia: {total_edge_bits}, minimal: 64")
-
-    header_bits = _extract_from_edges(img_gray, 64, edge_indices)
-    header_bytes = np.packbits(header_bits).tobytes()
-    original_len, n_bits = struct.unpack('>II', header_bytes)
-
-    max_possible_bytes = total_edge_bits // 8
-    if original_len <= 0 or original_len > max_possible_bytes:
-        raise ValueError(f"Header tidak valid: original_len={original_len} (maks: {max_possible_bytes})")
-    if n_bits <= 0 or n_bits > total_edge_bits - 64:
-        raise ValueError(f"Header tidak valid: n_bits={n_bits} (maks: {total_edge_bits - 64})")
-
-    total_bits = 64 + n_bits
-    if total_edge_bits < total_bits:
-        raise ValueError(f"Edge tidak cukup. Dibutuhkan: {total_bits}, tersedia: {total_edge_bits}")
-
-    all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
-    data_bits = all_bits[64:total_bits]
+    # Jika original_len dan n_bits tidak diberikan, kita harus mengekstrak semuanya
+    # Ini untuk kompatibilitas dengan cara lama (semua edge digunakan)
+    if original_len is None or n_bits is None:
+        # Ekstrak semua edge yang tersedia
+        total_bits = min(len(edge_indices), img_gray.size)
+        all_bits = _extract_from_edges(img_gray, total_bits, edge_indices)
+        data_bits = all_bits
+        n_bits = len(data_bits)
+    else:
+        # Ekstrak sesuai dengan panjang yang diketahui
+        if len(edge_indices) < n_bits:
+            raise ValueError(f"Edge tidak cukup. Dibutuhkan: {n_bits}, tersedia: {len(edge_indices)}")
+        data_bits = _extract_from_edges(img_gray, n_bits, edge_indices)
 
     expected_bytes = (n_bits + 7) // 8
     packed = np.packbits(data_bits[:expected_bytes * 8])
+
+    # Coba tebak original_len dari data jika tidak diberikan
+    if original_len is None:
+        # Asumsikan semua data adalah teks yang valid
+        original_len = len(packed)
 
     rows = (original_len + 7) // 8
     cols = 8

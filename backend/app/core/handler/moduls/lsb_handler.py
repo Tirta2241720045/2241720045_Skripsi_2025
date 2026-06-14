@@ -103,6 +103,7 @@ class LSBHandler:
 
     @staticmethod
     def embed_to_rgb_full(cover_img: Image.Image, secret_img: Image.Image) -> Image.Image:
+        """StegaShield menggunakan method ini - TIDAK BERUBAH"""
         cover_array = np.array(cover_img.convert('RGB'), dtype=np.uint8)
         height, width, _ = cover_array.shape
         buf = io.BytesIO()
@@ -118,6 +119,7 @@ class LSBHandler:
 
     @staticmethod
     def extract_from_rgb_full(stego_img: Image.Image) -> Image.Image | None:
+        """StegaShield menggunakan method ini - TIDAK BERUBAH"""
         img_array = np.array(stego_img.convert('RGB'), dtype=np.uint8)
         flat = img_array.ravel()
         if flat.size < 32:
@@ -127,6 +129,38 @@ class LSBHandler:
         if data_bytes is None:
             return None
         return Image.open(io.BytesIO(data_bytes))
+
+    # ============================================================
+    # METHOD BARU UNTUK EBS3 (tidak mempengaruhi StegaShield)
+    # ============================================================
+    @staticmethod
+    def embed_to_rgb_full_with_bytes(cover_img: Image.Image, data_bytes: bytes) -> Image.Image:
+        """
+        EBS3 menggunakan method ini untuk embed bytes langsung.
+        TIDAK mempengaruhi StegaShield.
+        """
+        cover_array = np.array(cover_img.convert('RGB'), dtype=np.uint8)
+        height, width, _ = cover_array.shape
+        bits, n_bits = LSBHandler._pack_data(data_bytes)
+        total_capacity = height * width * 3
+        if n_bits > total_capacity:
+            raise ValueError(f"Data terlalu besar. Kapasitas: {total_capacity} bits, Data: {n_bits} bits.")
+        flat = cover_array.ravel()
+        flat[:n_bits] = (flat[:n_bits] & np.uint8(0xFE)) | bits.astype(np.uint8)
+        return Image.fromarray(cover_array, mode='RGB')
+
+    @staticmethod
+    def extract_from_rgb_full_bytes(stego_img: Image.Image) -> bytes | None:
+        """
+        EBS3 menggunakan method ini untuk extract bytes langsung.
+        TIDAK mempengaruhi StegaShield.
+        """
+        img_array = np.array(stego_img.convert('RGB'), dtype=np.uint8)
+        flat = img_array.ravel()
+        if flat.size < 32:
+            return None
+        bits_source = (flat & 1).astype(np.uint8)
+        return LSBHandler._unpack_data(bits_source)
 
     @staticmethod
     def calculate_metrics(orig_img: Image.Image, stego_img: Image.Image, mode: str = 'L') -> dict:

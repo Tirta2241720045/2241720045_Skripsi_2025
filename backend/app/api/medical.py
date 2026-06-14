@@ -222,17 +222,53 @@ async def upload_medical_data(
     img_photo = _resize_photo_cover(img_photo.convert('RGB'))
     img_mri_gray = img_mri.convert('L')
 
+    # ============================================================
+    # #1 VALIDASI UKURAN MRI vs PHOTO (dari kode lama)
+    # ============================================================
     mri_w, mri_h = img_mri.size
     photo_w, photo_h = img_photo.size
 
-    timestamp = int(time.time() * 1000)
-    # Simpan method di nama file stego
-    prefix = f"{patient_id}_{timestamp}_{method}"
-    stego_filename = f"stego_{prefix}.png"
+    if mri_w > photo_w or mri_h > photo_h:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ukuran MRI ({mri_w}x{mri_h}) tidak boleh lebih besar dari foto pasien ({photo_w}x{photo_h})."
+        )
 
-    orig_photo_path = os.path.join(DIR_ORIGINAL, f"photo_{patient_id}_{timestamp}.png")
-    orig_mri_path   = os.path.join(DIR_ORIGINAL, f"mri_{patient_id}_{timestamp}.png")
-    orig_txt_path   = os.path.join(DIR_ORIGINAL, f"medical_{patient_id}_{timestamp}.txt")
+    # ============================================================
+    # #2 KAPASITAS DATA CHECK untuk metode stegoshield
+    # ============================================================
+    if method == "stegoshield":
+        from app.core.handler.stegoshield_handler import StegoShieldHandler
+        import os as _os
+        
+        aes_key = _os.getenv("AES_KEY", "SECRET_KEY_STEGOSHIELD_2026")
+        handler = StegoShieldHandler(aes_key)
+        
+        # Estimasi ukuran data terenkripsi
+        txt_bytes_len = len(txt_content.encode('utf-8'))
+        encrypted_size = txt_bytes_len + 48  # AES overhead: IV(16) + MAC(32) + padding
+        
+        # Dapatkan kapasitas RONI MRI
+        roni_capacity_bytes = handler.get_roni_capacity_bytes(mri_h, mri_w)
+        
+        if encrypted_size > roni_capacity_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Data terlalu besar. Kapasitas RONI MRI: {roni_capacity_bytes} bytes, Data terenkripsi: ~{encrypted_size} bytes. "
+                       f"Ukuran teks asli: {txt_bytes_len} bytes."
+            )
+
+    timestamp = int(time.time() * 1000)
+    
+    # ============================================================
+    # #3 PENAMAAN FILE KONSISTEN (sama seperti kode lama)
+    # ============================================================
+    prefix = f"{patient_id}_{timestamp}"
+    stego_filename = f"stego_{prefix}_{method}.png"
+
+    orig_photo_path = os.path.join(DIR_ORIGINAL, f"photo_{prefix}.png")
+    orig_mri_path   = os.path.join(DIR_ORIGINAL, f"mri_{prefix}.png")
+    orig_txt_path   = os.path.join(DIR_ORIGINAL, f"medical_{prefix}.txt")
     stego_out_path  = os.path.join(DIR_EMBEDDING, stego_filename)
 
     try:
@@ -254,7 +290,7 @@ async def upload_medical_data(
 
         stego_img.save(stego_out_path, format='PNG', compress_level=9)
 
-        # Simpan ke database (TANPA kolom method)
+        # Simpan ke database
         db_record = MedicalRecord(
             patient_id=patient_id,
             medical_data_path=_normalize_path(orig_txt_path),
@@ -397,6 +433,16 @@ async def extract_medical_data(
 
     # Ambil method dari nama file stego
     method = _parse_method_from_stego(record.stego_photo_path) or "stegoshield"
+    
+    # ============================================================
+    # #5 VALIDASI METHOD MASIH DIDUKUNG
+    # ============================================================
+    if method not in SUPPORTED_METHODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Metode '{method}' pada file ini tidak lagi didukung oleh sistem. "
+                   f"Metode yang didukung: {', '.join(SUPPORTED_METHODS)}"
+        )
 
     patient = db.query(Patient).filter(Patient.patient_id == record.patient_id).first()
     orig_photo_path, orig_mri_path, orig_txt_path = _get_original_paths(record.patient_id, record.stego_photo_path)
